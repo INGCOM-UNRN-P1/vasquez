@@ -1,0 +1,26 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "vasquez"
+version = "0.1.0"
+description = "Motor de inyección de fallos de entorno y hardware (Fault Injection Engine) en C vía LD_PRELOAD"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "typer>=0.9.0",
+    "rich>=13.0.0",
+    "pydantic>=2.0.0",
+]
+
+[project.scripts]
+vasquez = "vasquez.cli:app"
+
+[project.entry-points."ripley.plugins"]
+fault_injection = "vasquez.plugins.ripley_plugin:VasquezPlugin"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+pythonpath = ["src"]
