@@ -352,3 +352,12 @@ Podés encadenar `vasquez` con otras herramientas del ecosistema en una única l
 vasquez inject --target ./bin/app --faults "malloc:1" --diagnose
 ````
 
+---
+
+(manual-vasquez-seccion-plugins)=
+## 9. Extensión, Desarrollo de Plugins y API Python
+
+Para crear tus propias reglas, conectores de evaluación o integrar `vasquez` programáticamente en pipelines de CI/CD:
+
+- 👉 **Consultá la guía completa:** [Guía de Extensión y Creación de Plugins](plugins.md)
+
