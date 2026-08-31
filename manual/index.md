@@ -181,3 +181,53 @@ check-vasquez:
 ````
 
 Ejecutá `make check-vasquez` antes de cada commit para asegurar que tu código conserve el estado de aprobación.
+
+---
+
+(manual-vasquez-arquitectura)=
+## 7. Arquitectura Interna y Mecanismo Técnico
+
+La herramienta **`vasquez`** implementa un motor de alta precisión basado en:
+
+- **Tecnología Núcleo:** `C Dynamic Preload Library (LD_PRELOAD) + Function Interception Engine (dlsym RTLD_NEXT) + Fault State Machine`.
+- **Aislamiento y Determinismo:** Diseñada para operar sin efectos colaterales en entornos de integración continua (CI), terminales de estudiantes y servidores docentes headless.
+- **Manejo de Errores Pedagógico:** Todo fallo de sintaxis, memoria o lógica se traduce en una acción prescriptiva concreta con su respectiva justificación técnica.
+
+---
+
+(manual-vasquez-ecosistema)=
+## 8. Integración y Conexión con el Ecosistema
+
+````{note}
+Ninguna herramienta opera de forma aislada. **`vasquez`** forma parte del pipeline integral de evaluación, verificación y enseñanza de la cátedra.
+````
+
+### Diagrama de Flujo e Interoperabilidad
+
+````{mermaid}
+graph TD
+    BIN[Binario del Estudiante] --> VAS[Vasquez: Inyector LD_PRELOAD]
+    VAS -->|Intercepta malloc/fopen/write| GLIBC[glibc Calls (RTLD_NEXT)]
+    VAS -->|Fuerza Retorno NULL| FAULT[Simulación OOM / Falla I/O]
+    FAULT -->|Código sin Chequeo Crash SIGSEGV| HAL[Hal: Forense de Core Dumps]
+    VAS -->|Reporte de Manejo Defensivo| DRD[Dredd: Informe alumno_rN.md]
+````
+
+### Matriz de Intercambio de Datos
+
+| Canal | Herramientas Conectadas | Tipo de Datos Transferidos |
+| :--- | :--- | :--- |
+| **Entradas (Inputs)** | - `Binarios C compilados de estudiantes` | Código fuente, AST, binarios, testcases, contratos |
+| **Salidas (Outputs)** | - `hal (diagnóstico correlacionado de caídas)`
+- `dredd (evaluación de robustez defensiva)` | Informes Markdown, diagnósticos Rich, JSON, actas |
+| **Sincronización** | `hal`, `holden`, `nostromo`, `dredd` | Validación cruzada, flags compartidos y autofix |
+
+### Pipeline de Integración Recomendado
+
+Podés encadenar `vasquez` con otras herramientas del ecosistema en una única línea de comando:
+
+````{code-block} bash
+# Pipeline de integración típico
+vasquez inject --target ./bin/app --faults "malloc:1" --diagnose
+````
+
