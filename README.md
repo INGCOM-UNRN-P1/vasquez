@@ -45,3 +45,20 @@ vasquez inject app --faults "malloc:2,fopen:1"
 # Salida estructurada JSON
 vasquez inject solucion_alumno.c --json
 ```
+
+## Nuevas Capacidades Implementadas
+
+### Intercepción Avanzada y Diagnósticos
+```bash
+# Inyectar fallo en realloc en la 1ra ocurrencia
+vasquez inject app --faults "realloc:1"
+
+# Simular disco lleno (ENOSPC) en escrituras
+vasquez inject app --faults "write:ENOSPC"
+
+# Auditoría estricta de fugas de memoria en caminos de error
+vasquez inject app --faults "malloc:1" --check-leaks
+
+# Auditoría del entorno y compilador de interceptor
+vasquez doctor
+```
