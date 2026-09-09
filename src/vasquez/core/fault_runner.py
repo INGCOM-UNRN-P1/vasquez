@@ -11,7 +11,7 @@ from typing import List, Optional
 from vasquez.core.models import FaultConfig, FaultType, FaultRunResult, RobustnessReport
 from vasquez.core.cache import get_cached_injector_library
 from vasquez.core.crash_classifier import classify_execution
-from vasquez.core.leak_checker import analyze_trace_for_leaks
+from vasquez.core.leak_checker import analyze_trace_for_leaks, audit_free_null
 
 
 def run_single_fault_scenario(
@@ -29,8 +29,23 @@ def run_single_fault_scenario(
     preload_key = "DYLD_INSERT_LIBRARIES" if sys.platform == "darwin" else "LD_PRELOAD"
     env[preload_key] = str(so_path.resolve())
 
-    # Configuración de fallos de memoria
-    if fault.fault_type in (FaultType.MALLOC_FAIL, FaultType.CALLOC_FAIL, FaultType.REALLOC_FAIL, FaultType.STRDUP_FAIL, FaultType.POSIX_MEMALIGN_FAIL):
+    # Configuración de fallos de memoria específicos (Mejoras 11 y 16) y generales
+    if fault.fail_realloc_at is not None and fault.fail_realloc_at > 0:
+        env["VASQUEZ_REALLOC_FAIL_AT"] = str(fault.fail_realloc_at)
+    elif fault.fault_type == FaultType.REALLOC_FAIL and fault.fail_at_invocation > 0:
+        env["VASQUEZ_MALLOC_FAIL_AT"] = str(fault.fail_at_invocation)
+
+    if fault.fail_calloc_at is not None and fault.fail_calloc_at > 0:
+        env["VASQUEZ_CALLOC_FAIL_AT"] = str(fault.fail_calloc_at)
+    elif fault.fault_type == FaultType.CALLOC_FAIL and fault.fail_at_invocation > 0:
+        env["VASQUEZ_MALLOC_FAIL_AT"] = str(fault.fail_at_invocation)
+
+    if fault.fail_posix_memalign_at is not None and fault.fail_posix_memalign_at > 0:
+        env["VASQUEZ_POSIX_MEMALIGN_FAIL_AT"] = str(fault.fail_posix_memalign_at)
+    elif fault.fault_type == FaultType.POSIX_MEMALIGN_FAIL and fault.fail_at_invocation > 0:
+        env["VASQUEZ_MALLOC_FAIL_AT"] = str(fault.fail_at_invocation)
+
+    if fault.fault_type in (FaultType.MALLOC_FAIL, FaultType.STRDUP_FAIL):
         if fault.fail_at_invocation > 0:
             env["VASQUEZ_MALLOC_FAIL_AT"] = str(fault.fail_at_invocation)
         if fault.fail_probability > 0.0:
@@ -39,8 +54,17 @@ def run_single_fault_scenario(
     elif fault.fault_type == FaultType.PROBABILISTIC:
         env["VASQUEZ_MALLOC_PROB"] = str(fault.fail_probability or 0.20)
 
+    # Modo Cascada (Mejora 17)
+    if fault.cascade_failures or fault.fault_type == FaultType.CASCADE:
+        env["VASQUEZ_CASCADE_FAILS"] = "1"
+
+    # Memoria Basura / Envenenamiento (Mejora 25)
+    if fault.garbage_memory or fault.fault_type == FaultType.GARBAGE_MEMORY:
+        env["VASQUEZ_GARBAGE_MEMORY"] = "1"
+        env["VASQUEZ_POISON_BYTE"] = str(fault.poison_byte)
+
     # Configuración de fallos de archivos
-    elif fault.fault_type == FaultType.FOPEN_FAIL:
+    if fault.fault_type == FaultType.FOPEN_FAIL:
         env["VASQUEZ_FOPEN_FAIL_AT"] = str(fault.fail_at_invocation)
         env["VASQUEZ_ERRNO"] = str(fault.errno_value)
 
@@ -48,7 +72,7 @@ def run_single_fault_scenario(
         env["VASQUEZ_FAIL_WRITE_AFTER_BYTES"] = str(fault.fail_after_bytes if fault.fail_after_bytes >= 0 else 0)
 
     trace_file_path = None
-    if fault.enable_trace or fault.check_leaks:
+    if fault.enable_trace or fault.check_leaks or fault.audit_free_null or fault.fault_type == FaultType.AUDIT_FREE_NULL:
         trace_file_path = binary_path.parent / f"vasquez_trace_{os.getpid()}_{fault.fail_at_invocation}.log"
         env["VASQUEZ_TRACE_FILE"] = str(trace_file_path.resolve())
 
@@ -77,13 +101,27 @@ def run_single_fault_scenario(
 
         trace_lines: List[str] = []
         leaks_detected = False
+        free_null_count = 0
+        total_free_count = 0
+        cascade_triggered = False
+        garbage_injected = False
+
         if trace_file_path and trace_file_path.exists():
             try:
                 trace_lines = trace_file_path.read_text(encoding="utf-8", errors="replace").splitlines()
+                cascade_triggered = any("CASCADA" in line for line in trace_lines)
+                garbage_injected = any("MEMORIA BASURA ENVENENADA" in line for line in trace_lines)
+
                 if fault.check_leaks:
                     leaks_detected, leak_diag = analyze_trace_for_leaks(trace_lines)
                     if leaks_detected:
                         diag += f" Advertencia: {leak_diag}"
+
+                if fault.audit_free_null or fault.fault_type == FaultType.AUDIT_FREE_NULL or fault.enable_trace:
+                    free_null_count, total_free_count, fn_diag = audit_free_null(trace_lines)
+                    if fault.audit_free_null or fault.fault_type == FaultType.AUDIT_FREE_NULL:
+                        diag += f" [{fn_diag}]"
+
                 trace_file_path.unlink(missing_ok=True)
             except Exception:
                 pass
@@ -98,6 +136,10 @@ def run_single_fault_scenario(
             diagnosis=diag,
             crash_category=category,
             leaks_detected=leaks_detected,
+            free_null_calls=free_null_count,
+            total_free_calls=total_free_count,
+            cascade_triggered=cascade_triggered,
+            garbage_memory_injected=garbage_injected,
             trace_log=trace_lines
         )
 
@@ -128,7 +170,7 @@ def evaluate_robustness(
         if source_or_binary.suffix == ".c":
             bin_path = tmp_path / "target_app"
             comp = subprocess.run(
-                ["gcc", "-O0", "-g", str(source_or_binary), "-o", str(bin_path)],
+                ["gcc", "-O0", "-g", "-fno-builtin-free", str(source_or_binary), "-o", str(bin_path)],
                 capture_output=True,
                 check=False
             )

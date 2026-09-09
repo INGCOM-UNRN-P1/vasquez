@@ -145,3 +145,164 @@ def test_cli_inject_flags(tmp_path):
     res = runner.invoke(app, ["inject", str(src), "--fail-malloc-at", "1", "--trace", "--check-leaks", "--json"])
     assert res.exit_code == 0
     assert '"handled_gracefully": true' in res.output
+
+
+def test_realloc_null_injection_qol11(tmp_path):
+    src = tmp_path / "realloc_null.c"
+    src.write_text("""
+    #include <stdio.h>
+    #include <stdlib.h>
+    int main(void) {
+        int *p = malloc(sizeof(int) * 4);
+        if (!p) return 1;
+        int *np = realloc(p, sizeof(int) * 8);
+        if (np == NULL) {
+            // Manejo correcto: liberar el puntero previo preservado por el SO
+            free(p);
+            return 5;
+        }
+        free(np);
+        return 0;
+    }
+    """)
+    rep = evaluate_robustness(src, [FaultConfig(
+        fault_type=FaultType.REALLOC_FAIL,
+        fail_realloc_at=1,
+        enable_trace=True,
+        check_leaks=True
+    )])
+    assert rep.passed is True
+    assert rep.results[0].exit_code == 5
+    assert rep.results[0].handled_gracefully is True
+    assert rep.results[0].leaks_detected is False
+
+
+def test_posix_memalign_and_calloc_qol16(tmp_path):
+    src = tmp_path / "memalign.c"
+    src.write_text("""
+    #include <stdio.h>
+    #include <stdlib.h>
+    #include <errno.h>
+    int main(void) {
+        void *ptr = NULL;
+        int ret = posix_memalign(&ptr, 64, 128);
+        if (ret == ENOMEM || ret != 0) {
+            return 6;
+        }
+        free(ptr);
+        return 0;
+    }
+    """)
+    rep = evaluate_robustness(src, [FaultConfig(
+        fault_type=FaultType.POSIX_MEMALIGN_FAIL,
+        fail_posix_memalign_at=1,
+        enable_trace=True
+    )])
+    assert rep.passed is True
+    assert rep.results[0].exit_code == 6
+
+
+def test_cascade_failure_mode_qol17(tmp_path):
+    src = tmp_path / "cascade.c"
+    src.write_text("""
+    #include <stdio.h>
+    #include <stdlib.h>
+    int main(void) {
+        void *p1 = malloc(16);
+        void *p2 = malloc(32);
+        void *p3 = calloc(4, 4);
+        // En cascada, p1 falla y activa la cascada, haciendo que p2 y p3 también fallen
+        if (p1 == NULL && p2 == NULL && p3 == NULL) {
+            return 7;
+        }
+        if (p1) free(p1);
+        if (p2) free(p2);
+        if (p3) free(p3);
+        return 0;
+    }
+    """)
+    rep = evaluate_robustness(src, [FaultConfig(
+        fault_type=FaultType.MALLOC_FAIL,
+        fail_at_invocation=1,
+        cascade_failures=True,
+        enable_trace=True
+    )])
+    assert rep.passed is True
+    assert rep.results[0].exit_code == 7
+    assert rep.results[0].cascade_triggered is True
+
+
+def test_audit_free_null_qol20(tmp_path):
+    src = tmp_path / "cleanup.c"
+    src.write_text("""
+    #include <stdio.h>
+    #include <stdlib.h>
+    int main(void) {
+        void *a = malloc(10);
+        void *b = NULL; // No llegó a asignarse
+        // Rutina de limpieza defensiva
+        free(a);
+        free(b); // Invocación inocua de free(NULL)
+        free(NULL); // Otra invocación explícita
+        return 0;
+    }
+    """)
+    rep = evaluate_robustness(src, [FaultConfig(
+        fault_type=FaultType.AUDIT_FREE_NULL,
+        audit_free_null=True,
+        enable_trace=True
+    )])
+    assert rep.passed is True
+    assert rep.results[0].free_null_calls >= 2
+    assert "free(NULL)" in rep.results[0].diagnosis
+
+
+def test_garbage_memory_poisoning_qol25(tmp_path):
+    src = tmp_path / "garbage.c"
+    src.write_text("""
+    #include <stdio.h>
+    #include <stdlib.h>
+    int main(void) {
+        unsigned char *buf = malloc(16);
+        if (!buf) return 1;
+        // Si la memoria fue envenenada con 0xCD, el primer byte será 0xCD
+        int es_basura = (buf[0] == 0xCD && buf[15] == 0xCD);
+        free(buf);
+        return es_basura ? 8 : 0;
+    }
+    """)
+    rep = evaluate_robustness(src, [FaultConfig(
+        fault_type=FaultType.GARBAGE_MEMORY,
+        fail_at_invocation=-1,
+        garbage_memory=True,
+        poison_byte=0xCD,
+        enable_trace=True
+    )])
+    assert rep.passed is True
+    assert rep.results[0].exit_code == 8
+    assert rep.results[0].garbage_memory_injected is True
+
+
+def test_cli_qol_options(tmp_path):
+    src = tmp_path / "app_qol.c"
+    src.write_text("""
+    #include <stdlib.h>
+    int main(void) {
+        void *p = malloc(16);
+        free(p);
+        free(NULL);
+        return 0;
+    }
+    """)
+    res = runner.invoke(app, [
+        "inject", str(src),
+        "--fail-realloc-at", "1",
+        "--cascade",
+        "--audit-free-null",
+        "--garbage-memory",
+        "--poison-byte", "170",
+        "--json"
+    ])
+    assert res.exit_code == 0
+    assert '"free_null_calls": 1' in res.output
+
