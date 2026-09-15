@@ -57,6 +57,7 @@ class FaultRunResult(BaseModel):
 
 
 class RobustnessReport(BaseModel):
+    schema_version: str = "1.0.0"
     target_binary: str
     total_scenarios_tested: int = 0
     passed_scenarios_count: int = 0

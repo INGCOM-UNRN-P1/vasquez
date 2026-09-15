@@ -45,7 +45,10 @@ def main(
 
 def generar_seccion_markdown(report: RobustnessReport) -> str:
     """Genera sección de inyección de fallos y programación defensiva para Dredd."""
-    lines = ["## Inyección de Fallos y Programación Defensiva (Vasquez)\n"]
+    lines = [
+        "<!-- dredd-section: vasquez v1.0.0 -->\n",
+        "## Inyección de Fallos y Programación Defensiva (Vasquez)\n",
+    ]
     lines.append(f"- **Archivo analizado:** `{Path(report.target_binary).name}`")
     lines.append(f"- **Escenarios inyectados:** {report.total_scenarios_tested}")
     lines.append(f"- **Crashes / Fallos de control:** {report.crashed_scenarios_count}\n")
@@ -58,8 +61,9 @@ def generar_seccion_markdown(report: RobustnessReport) -> str:
         for r in report.results:
             st = "✓ MANEJADO" if r.handled_gracefully else "❌ CRASH"
             ret_s = f"`Signal: {r.signal_name}`" if r.signal_name else f"`Exit: {r.exit_code}`"
-            cat_s = r.crash_category or "N/A"
-            lines.append(f"| `{r.fault_config.fault_type.value}` | {r.fault_config.fail_at_invocation} | `{cat_s}` | **{st}** | {ret_s} | {r.diagnosis} |")
+            cat_s = (r.crash_category or "N/A").replace("|", "&#124;")
+            diag_limpio = r.diagnosis.replace("|", "&#124;")
+            lines.append(f"| `{r.fault_config.fault_type.value}` | {r.fault_config.fail_at_invocation} | `{cat_s}` | **{st}** | {ret_s} | {diag_limpio} |")
         lines.append("")
     return "\n".join(lines)
 
