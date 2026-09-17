@@ -12,6 +12,22 @@ from vasquez.core.models import FaultConfig, FaultType, FaultRunResult, Robustne
 from vasquez.core.cache import get_cached_injector_library
 from vasquez.core.crash_classifier import classify_execution
 from vasquez.core.leak_checker import analyze_trace_for_leaks, audit_free_null
+from vasquez.core.constants import (
+    ENV_MALLOC_FAIL_AT,
+    ENV_CALLOC_FAIL_AT,
+    ENV_REALLOC_FAIL_AT,
+    ENV_POSIX_MEMALIGN_FAIL_AT,
+    ENV_MALLOC_PROB,
+    ENV_CASCADE_FAILS,
+    ENV_GARBAGE_MEMORY,
+    ENV_POISON_BYTE,
+    ENV_FOPEN_FAIL_AT,
+    ENV_ERRNO,
+    ENV_FAIL_WRITE_AFTER_BYTES,
+    ENV_FREAD_FAIL_AT,
+    ENV_FCLOSE_FAIL_AT,
+    ENV_TRACE_FILE,
+)
 
 
 def run_single_fault_scenario(
@@ -31,50 +47,56 @@ def run_single_fault_scenario(
 
     # Configuración de fallos de memoria específicos (Mejoras 11 y 16) y generales
     if fault.fail_realloc_at is not None and fault.fail_realloc_at > 0:
-        env["VASQUEZ_REALLOC_FAIL_AT"] = str(fault.fail_realloc_at)
+        env[ENV_REALLOC_FAIL_AT] = str(fault.fail_realloc_at)
     elif fault.fault_type == FaultType.REALLOC_FAIL and fault.fail_at_invocation > 0:
-        env["VASQUEZ_MALLOC_FAIL_AT"] = str(fault.fail_at_invocation)
+        env[ENV_MALLOC_FAIL_AT] = str(fault.fail_at_invocation)
 
     if fault.fail_calloc_at is not None and fault.fail_calloc_at > 0:
-        env["VASQUEZ_CALLOC_FAIL_AT"] = str(fault.fail_calloc_at)
+        env[ENV_CALLOC_FAIL_AT] = str(fault.fail_calloc_at)
     elif fault.fault_type == FaultType.CALLOC_FAIL and fault.fail_at_invocation > 0:
-        env["VASQUEZ_MALLOC_FAIL_AT"] = str(fault.fail_at_invocation)
+        env[ENV_MALLOC_FAIL_AT] = str(fault.fail_at_invocation)
 
     if fault.fail_posix_memalign_at is not None and fault.fail_posix_memalign_at > 0:
-        env["VASQUEZ_POSIX_MEMALIGN_FAIL_AT"] = str(fault.fail_posix_memalign_at)
+        env[ENV_POSIX_MEMALIGN_FAIL_AT] = str(fault.fail_posix_memalign_at)
     elif fault.fault_type == FaultType.POSIX_MEMALIGN_FAIL and fault.fail_at_invocation > 0:
-        env["VASQUEZ_MALLOC_FAIL_AT"] = str(fault.fail_at_invocation)
+        env[ENV_MALLOC_FAIL_AT] = str(fault.fail_at_invocation)
 
     if fault.fault_type in (FaultType.MALLOC_FAIL, FaultType.STRDUP_FAIL):
         if fault.fail_at_invocation > 0:
-            env["VASQUEZ_MALLOC_FAIL_AT"] = str(fault.fail_at_invocation)
+            env[ENV_MALLOC_FAIL_AT] = str(fault.fail_at_invocation)
         if fault.fail_probability > 0.0:
-            env["VASQUEZ_MALLOC_PROB"] = str(fault.fail_probability)
+            env[ENV_MALLOC_PROB] = str(fault.fail_probability)
 
     elif fault.fault_type == FaultType.PROBABILISTIC:
-        env["VASQUEZ_MALLOC_PROB"] = str(fault.fail_probability or 0.20)
+        env[ENV_MALLOC_PROB] = str(fault.fail_probability or 0.20)
 
     # Modo Cascada (Mejora 17)
     if fault.cascade_failures or fault.fault_type == FaultType.CASCADE:
-        env["VASQUEZ_CASCADE_FAILS"] = "1"
+        env[ENV_CASCADE_FAILS] = "1"
 
     # Memoria Basura / Envenenamiento (Mejora 25)
     if fault.garbage_memory or fault.fault_type == FaultType.GARBAGE_MEMORY:
-        env["VASQUEZ_GARBAGE_MEMORY"] = "1"
-        env["VASQUEZ_POISON_BYTE"] = str(fault.poison_byte)
+        env[ENV_GARBAGE_MEMORY] = "1"
+        env[ENV_POISON_BYTE] = str(fault.poison_byte)
 
     # Configuración de fallos de archivos
     if fault.fault_type == FaultType.FOPEN_FAIL:
-        env["VASQUEZ_FOPEN_FAIL_AT"] = str(fault.fail_at_invocation)
-        env["VASQUEZ_ERRNO"] = str(fault.errno_value)
+        env[ENV_FOPEN_FAIL_AT] = str(fault.fail_at_invocation)
+        env[ENV_ERRNO] = str(fault.errno_value)
 
     elif fault.fault_type == FaultType.FWRITE_FAIL:
-        env["VASQUEZ_FAIL_WRITE_AFTER_BYTES"] = str(fault.fail_after_bytes if fault.fail_after_bytes >= 0 else 0)
+        env[ENV_FAIL_WRITE_AFTER_BYTES] = str(fault.fail_after_bytes if fault.fail_after_bytes >= 0 else 0)
+
+    elif fault.fault_type == FaultType.FREAD_FAIL:
+        env[ENV_FREAD_FAIL_AT] = str(fault.fail_at_invocation)
+
+    elif fault.fault_type == FaultType.FCLOSE_FAIL:
+        env[ENV_FCLOSE_FAIL_AT] = str(fault.fail_at_invocation)
 
     trace_file_path = None
     if fault.enable_trace or fault.check_leaks or fault.audit_free_null or fault.fault_type == FaultType.AUDIT_FREE_NULL:
         trace_file_path = binary_path.parent / f"vasquez_trace_{os.getpid()}_{fault.fail_at_invocation}.log"
-        env["VASQUEZ_TRACE_FILE"] = str(trace_file_path.resolve())
+        env[ENV_TRACE_FILE] = str(trace_file_path.resolve())
 
     try:
         res = subprocess.run(
@@ -181,7 +203,7 @@ def evaluate_robustness(
             target_bin = source_or_binary
 
         if not scenarios:
-            # Batería estándar completa: malloc en 1ra y 2da llamada, fopen en 1ra llamada, fwrite disco lleno
+            # Batería estándar por defecto: malloc en 1ra y 2da llamada, fopen en 1ra llamada
             scenarios = [
                 FaultConfig(fault_type=FaultType.MALLOC_FAIL, fail_at_invocation=1, enable_trace=True),
                 FaultConfig(fault_type=FaultType.MALLOC_FAIL, fail_at_invocation=2, enable_trace=True),

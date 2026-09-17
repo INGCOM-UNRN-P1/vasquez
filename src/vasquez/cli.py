@@ -68,11 +68,176 @@ def generar_seccion_markdown(report: RobustnessReport) -> str:
     return "\n".join(lines)
 
 
+ERRNO_MAP: dict[str, int] = {
+    "EPERM": 1,
+    "ENOENT": 2,
+    "EIO": 5,
+    "ENXIO": 6,
+    "EBADF": 9,
+    "ENOMEM": 12,
+    "EACCES": 13,
+    "EFAULT": 14,
+    "EBUSY": 16,
+    "EEXIST": 17,
+    "EINVAL": 22,
+    "ENFILE": 23,
+    "EMFILE": 24,
+    "EFBIG": 27,
+    "ENOSPC": 28,
+    "EROFS": 30,
+}
+
+
+def parse_fault_spec(
+    faults_str: str,
+    cascade: bool = False,
+    garbage_memory: bool = False,
+    poison_byte: int = 0xA5,
+    audit_free_null: bool = False,
+    trace: bool = False,
+    check_leaks: bool = False,
+) -> List[FaultConfig]:
+    """Parsea una especificación de fallos separada por comas (ej. 'malloc:1,write:ENOSPC').
+
+    Lanza typer.BadParameter ante tokens no reconocidos o valores inválidos.
+    """
+    scenarios: List[FaultConfig] = []
+    base_kwargs = {
+        "cascade_failures": cascade,
+        "garbage_memory": garbage_memory,
+        "poison_byte": poison_byte,
+        "audit_free_null": audit_free_null,
+        "enable_trace": trace or audit_free_null,
+        "check_leaks": check_leaks,
+    }
+
+    tipos_validos = {
+        "malloc", "calloc", "realloc", "strdup", "posix_memalign",
+        "fopen", "fwrite", "write", "fread", "fclose",
+        "cascade", "cascada", "garbage", "poison", "basura",
+        "free_null", "free_null_audit"
+    }
+
+    for raw_item in faults_str.split(","):
+        item = raw_item.strip()
+        if not item:
+            continue
+        parts = item.split(":")
+        f_type_str = parts[0].lower()
+        val_str = parts[1].strip() if len(parts) > 1 else ""
+
+        if f_type_str not in tipos_validos:
+            raise typer.BadParameter(
+                f"Tipo de fallo desconocido en --faults: '{f_type_str}'. "
+                f"Opciones válidas: {', '.join(sorted(tipos_validos))}."
+            )
+
+        f_num = 1
+        errno_val = 12
+        if val_str:
+            if val_str.isdigit():
+                f_num = int(val_str)
+            elif val_str.upper() in ERRNO_MAP:
+                errno_val = ERRNO_MAP[val_str.upper()]
+                f_num = 0 if f_type_str in ("fwrite", "write") else 1
+            else:
+                raise typer.BadParameter(
+                    f"Valor inválido '{val_str}' para fallo '{f_type_str}'. Debe ser número entero o código errno (ej. ENOSPC)."
+                )
+
+        if f_type_str == "malloc":
+            scenarios.append(FaultConfig(fault_type=FaultType.MALLOC_FAIL, fail_at_invocation=f_num, **base_kwargs))
+        elif f_type_str == "calloc":
+            scenarios.append(FaultConfig(fault_type=FaultType.CALLOC_FAIL, fail_at_invocation=f_num, fail_calloc_at=f_num, **base_kwargs))
+        elif f_type_str == "realloc":
+            scenarios.append(FaultConfig(fault_type=FaultType.REALLOC_FAIL, fail_at_invocation=f_num, fail_realloc_at=f_num, **base_kwargs))
+        elif f_type_str == "strdup":
+            scenarios.append(FaultConfig(fault_type=FaultType.STRDUP_FAIL, fail_at_invocation=f_num, **base_kwargs))
+        elif f_type_str == "posix_memalign":
+            scenarios.append(FaultConfig(fault_type=FaultType.POSIX_MEMALIGN_FAIL, fail_at_invocation=f_num, fail_posix_memalign_at=f_num, **base_kwargs))
+        elif f_type_str in ("cascade", "cascada"):
+            scenarios.append(FaultConfig(fault_type=FaultType.CASCADE, fail_at_invocation=f_num, **{**base_kwargs, "cascade_failures": True}))
+        elif f_type_str in ("garbage", "poison", "basura"):
+            scenarios.append(FaultConfig(fault_type=FaultType.GARBAGE_MEMORY, fail_at_invocation=-1, **{**base_kwargs, "garbage_memory": True}))
+        elif f_type_str in ("free_null", "free_null_audit"):
+            scenarios.append(FaultConfig(fault_type=FaultType.AUDIT_FREE_NULL, fail_at_invocation=f_num, **{**base_kwargs, "audit_free_null": True, "enable_trace": True}))
+        elif f_type_str == "fopen":
+            scenarios.append(FaultConfig(fault_type=FaultType.FOPEN_FAIL, fail_at_invocation=f_num, errno_value=errno_val if val_str.upper() in ERRNO_MAP else 13, cascade_failures=cascade, enable_trace=trace or audit_free_null))
+        elif f_type_str in ("fwrite", "write"):
+            fail_bytes = 0 if val_str.upper() == "ENOSPC" else f_num
+            scenarios.append(FaultConfig(fault_type=FaultType.FWRITE_FAIL, fail_after_bytes=fail_bytes, errno_value=errno_val, cascade_failures=cascade, enable_trace=trace or audit_free_null))
+        elif f_type_str == "fread":
+            scenarios.append(FaultConfig(fault_type=FaultType.FREAD_FAIL, fail_at_invocation=f_num, cascade_failures=cascade, enable_trace=trace or audit_free_null))
+        elif f_type_str == "fclose":
+            scenarios.append(FaultConfig(fault_type=FaultType.FCLOSE_FAIL, fail_at_invocation=f_num, cascade_failures=cascade, enable_trace=trace or audit_free_null))
+
+    return scenarios
+
+
+def build_cli_scenarios(
+    faults_str: Optional[str] = None,
+    fail_malloc_at: Optional[int] = None,
+    fail_malloc_prob: Optional[float] = None,
+    fail_realloc_at: Optional[int] = None,
+    fail_calloc_at: Optional[int] = None,
+    fail_posix_memalign_at: Optional[int] = None,
+    cascade: bool = False,
+    audit_free_null: bool = False,
+    garbage_memory: bool = False,
+    poison_byte: int = 0xA5,
+    fail_write_after: Optional[int] = None,
+    trace: bool = False,
+    check_leaks: bool = False,
+) -> List[FaultConfig]:
+    """Construye la lista unificada de escenarios a partir de las opciones CLI."""
+    base_kwargs = {
+        "cascade_failures": cascade,
+        "audit_free_null": audit_free_null,
+        "garbage_memory": garbage_memory,
+        "poison_byte": poison_byte,
+        "enable_trace": trace or audit_free_null,
+        "check_leaks": check_leaks,
+    }
+    scenarios: List[FaultConfig] = []
+
+    if fail_malloc_at is not None:
+        scenarios.append(FaultConfig(fault_type=FaultType.MALLOC_FAIL, fail_at_invocation=fail_malloc_at, **base_kwargs))
+    if fail_realloc_at is not None:
+        scenarios.append(FaultConfig(fault_type=FaultType.REALLOC_FAIL, fail_at_invocation=fail_realloc_at, fail_realloc_at=fail_realloc_at, **base_kwargs))
+    if fail_calloc_at is not None:
+        scenarios.append(FaultConfig(fault_type=FaultType.CALLOC_FAIL, fail_at_invocation=fail_calloc_at, fail_calloc_at=fail_calloc_at, **base_kwargs))
+    if fail_posix_memalign_at is not None:
+        scenarios.append(FaultConfig(fault_type=FaultType.POSIX_MEMALIGN_FAIL, fail_at_invocation=fail_posix_memalign_at, fail_posix_memalign_at=fail_posix_memalign_at, **base_kwargs))
+    if fail_malloc_prob is not None:
+        scenarios.append(FaultConfig(fault_type=FaultType.PROBABILISTIC, fail_probability=fail_malloc_prob, **base_kwargs))
+    if cascade and not scenarios:
+        scenarios.append(FaultConfig(fault_type=FaultType.CASCADE, fail_at_invocation=1, **{**base_kwargs, "cascade_failures": True}))
+    if garbage_memory and not scenarios:
+        scenarios.append(FaultConfig(fault_type=FaultType.GARBAGE_MEMORY, fail_at_invocation=-1, **{**base_kwargs, "garbage_memory": True}))
+    if audit_free_null and not scenarios:
+        scenarios.append(FaultConfig(fault_type=FaultType.AUDIT_FREE_NULL, fail_at_invocation=1, **{**base_kwargs, "audit_free_null": True, "enable_trace": True}))
+    if fail_write_after is not None:
+        scenarios.append(FaultConfig(fault_type=FaultType.FWRITE_FAIL, fail_after_bytes=fail_write_after, **base_kwargs))
+
+    if faults_str:
+        scenarios.extend(parse_fault_spec(
+            faults_str,
+            cascade=cascade,
+            garbage_memory=garbage_memory,
+            poison_byte=poison_byte,
+            audit_free_null=audit_free_null,
+            trace=trace,
+            check_leaks=check_leaks,
+        ))
+
+    return scenarios
+
+
 @app.command("inject")
 @app.command("check")
 def inject(
     target: Path = typer.Argument(..., help="Archivo .c o binario a evaluar bajo inyección de fallos", exists=True),
-    faults_str: Optional[str] = typer.Option(None, "--faults", "-f", help="Especificación: 'malloc:1,malloc:2,fopen:1,fwrite:1024'"),
+    faults_str: Optional[str] = typer.Option(None, "--faults", "-f", help="Especificación: 'malloc:1,malloc:2,fopen:1,fwrite:1024,write:ENOSPC'"),
     fail_malloc_at: Optional[int] = typer.Option(None, "--fail-malloc-at", help="Fallar en la llamada N a malloc."),
     fail_malloc_prob: Optional[float] = typer.Option(None, "--fail-malloc-prob", help="Probabilidad de fallo en malloc (0.0 a 1.0)."),
     fail_realloc_at: Optional[int] = typer.Option(None, "--fail-realloc-at", help="Fallar en la llamada N a realloc devolviendo NULL (Mejora 11)."),
@@ -90,137 +255,21 @@ def inject(
     output_md: Optional[Path] = typer.Option(None, "--md", "--output-md", help="Generar sección de reporte en formato Markdown para fusión en Dredd."),
 ):
     """Inyecta fallos controlados (malloc/calloc/realloc NULL, cascada, memoria basura) evaluando la resiliencia del código C."""
-    scenarios = []
-
-    if fail_malloc_at is not None:
-        scenarios.append(FaultConfig(
-            fault_type=FaultType.MALLOC_FAIL,
-            fail_at_invocation=fail_malloc_at,
-            cascade_failures=cascade,
-            audit_free_null=audit_free_null,
-            garbage_memory=garbage_memory,
-            poison_byte=poison_byte,
-            enable_trace=trace or audit_free_null,
-            check_leaks=check_leaks
-        ))
-
-    if fail_realloc_at is not None:
-        scenarios.append(FaultConfig(
-            fault_type=FaultType.REALLOC_FAIL,
-            fail_at_invocation=fail_realloc_at,
-            fail_realloc_at=fail_realloc_at,
-            cascade_failures=cascade,
-            audit_free_null=audit_free_null,
-            garbage_memory=garbage_memory,
-            poison_byte=poison_byte,
-            enable_trace=trace or audit_free_null,
-            check_leaks=check_leaks
-        ))
-
-    if fail_calloc_at is not None:
-        scenarios.append(FaultConfig(
-            fault_type=FaultType.CALLOC_FAIL,
-            fail_at_invocation=fail_calloc_at,
-            fail_calloc_at=fail_calloc_at,
-            cascade_failures=cascade,
-            audit_free_null=audit_free_null,
-            garbage_memory=garbage_memory,
-            poison_byte=poison_byte,
-            enable_trace=trace or audit_free_null,
-            check_leaks=check_leaks
-        ))
-
-    if fail_posix_memalign_at is not None:
-        scenarios.append(FaultConfig(
-            fault_type=FaultType.POSIX_MEMALIGN_FAIL,
-            fail_at_invocation=fail_posix_memalign_at,
-            fail_posix_memalign_at=fail_posix_memalign_at,
-            cascade_failures=cascade,
-            audit_free_null=audit_free_null,
-            garbage_memory=garbage_memory,
-            poison_byte=poison_byte,
-            enable_trace=trace or audit_free_null,
-            check_leaks=check_leaks
-        ))
-
-    if fail_malloc_prob is not None:
-        scenarios.append(FaultConfig(
-            fault_type=FaultType.PROBABILISTIC,
-            fail_probability=fail_malloc_prob,
-            cascade_failures=cascade,
-            audit_free_null=audit_free_null,
-            garbage_memory=garbage_memory,
-            poison_byte=poison_byte,
-            enable_trace=trace or audit_free_null,
-            check_leaks=check_leaks
-        ))
-
-    if cascade and not scenarios:
-        scenarios.append(FaultConfig(
-            fault_type=FaultType.CASCADE,
-            fail_at_invocation=1,
-            cascade_failures=True,
-            audit_free_null=audit_free_null,
-            garbage_memory=garbage_memory,
-            poison_byte=poison_byte,
-            enable_trace=trace or audit_free_null,
-            check_leaks=check_leaks
-        ))
-
-    if garbage_memory and not scenarios:
-        scenarios.append(FaultConfig(
-            fault_type=FaultType.GARBAGE_MEMORY,
-            fail_at_invocation=-1,
-            garbage_memory=True,
-            poison_byte=poison_byte,
-            audit_free_null=audit_free_null,
-            enable_trace=trace or audit_free_null,
-            check_leaks=check_leaks
-        ))
-
-    if audit_free_null and not scenarios:
-        scenarios.append(FaultConfig(
-            fault_type=FaultType.AUDIT_FREE_NULL,
-            fail_at_invocation=1,
-            audit_free_null=True,
-            enable_trace=True,
-            check_leaks=check_leaks
-        ))
-
-    if fail_write_after is not None:
-        scenarios.append(FaultConfig(
-            fault_type=FaultType.FWRITE_FAIL,
-            fail_after_bytes=fail_write_after,
-            cascade_failures=cascade,
-            audit_free_null=audit_free_null,
-            enable_trace=trace or audit_free_null,
-            check_leaks=check_leaks
-        ))
-
-    if faults_str:
-        for item in faults_str.split(","):
-            parts = item.strip().split(":")
-            if parts:
-                f_type_str = parts[0].lower()
-                f_num = int(parts[1]) if len(parts) > 1 else 1
-                if f_type_str == "malloc":
-                    scenarios.append(FaultConfig(fault_type=FaultType.MALLOC_FAIL, fail_at_invocation=f_num, cascade_failures=cascade, garbage_memory=garbage_memory, poison_byte=poison_byte, audit_free_null=audit_free_null, enable_trace=trace or audit_free_null, check_leaks=check_leaks))
-                elif f_type_str == "calloc":
-                    scenarios.append(FaultConfig(fault_type=FaultType.CALLOC_FAIL, fail_at_invocation=f_num, fail_calloc_at=f_num, cascade_failures=cascade, garbage_memory=garbage_memory, poison_byte=poison_byte, audit_free_null=audit_free_null, enable_trace=trace or audit_free_null, check_leaks=check_leaks))
-                elif f_type_str == "realloc":
-                    scenarios.append(FaultConfig(fault_type=FaultType.REALLOC_FAIL, fail_at_invocation=f_num, fail_realloc_at=f_num, cascade_failures=cascade, garbage_memory=garbage_memory, poison_byte=poison_byte, audit_free_null=audit_free_null, enable_trace=trace or audit_free_null, check_leaks=check_leaks))
-                elif f_type_str == "posix_memalign":
-                    scenarios.append(FaultConfig(fault_type=FaultType.POSIX_MEMALIGN_FAIL, fail_at_invocation=f_num, fail_posix_memalign_at=f_num, cascade_failures=cascade, garbage_memory=garbage_memory, poison_byte=poison_byte, audit_free_null=audit_free_null, enable_trace=trace or audit_free_null, check_leaks=check_leaks))
-                elif f_type_str in ("cascade", "cascada"):
-                    scenarios.append(FaultConfig(fault_type=FaultType.CASCADE, fail_at_invocation=f_num, cascade_failures=True, audit_free_null=audit_free_null, garbage_memory=garbage_memory, poison_byte=poison_byte, enable_trace=trace or audit_free_null, check_leaks=check_leaks))
-                elif f_type_str in ("garbage", "poison", "basura"):
-                    scenarios.append(FaultConfig(fault_type=FaultType.GARBAGE_MEMORY, fail_at_invocation=-1, garbage_memory=True, poison_byte=poison_byte, audit_free_null=audit_free_null, enable_trace=trace or audit_free_null, check_leaks=check_leaks))
-                elif f_type_str in ("free_null", "free_null_audit"):
-                    scenarios.append(FaultConfig(fault_type=FaultType.AUDIT_FREE_NULL, fail_at_invocation=f_num, audit_free_null=True, enable_trace=True, check_leaks=check_leaks))
-                elif f_type_str == "fopen":
-                    scenarios.append(FaultConfig(fault_type=FaultType.FOPEN_FAIL, fail_at_invocation=f_num, errno_value=13, cascade_failures=cascade, enable_trace=trace or audit_free_null))
-                elif f_type_str == "fwrite":
-                    scenarios.append(FaultConfig(fault_type=FaultType.FWRITE_FAIL, fail_after_bytes=f_num, cascade_failures=cascade, enable_trace=trace or audit_free_null))
+    scenarios = build_cli_scenarios(
+        faults_str=faults_str,
+        fail_malloc_at=fail_malloc_at,
+        fail_malloc_prob=fail_malloc_prob,
+        fail_realloc_at=fail_realloc_at,
+        fail_calloc_at=fail_calloc_at,
+        fail_posix_memalign_at=fail_posix_memalign_at,
+        cascade=cascade,
+        audit_free_null=audit_free_null,
+        garbage_memory=garbage_memory,
+        poison_byte=poison_byte,
+        fail_write_after=fail_write_after,
+        trace=trace,
+        check_leaks=check_leaks,
+    )
 
     report = evaluate_robustness(target, scenarios=scenarios if scenarios else None, input_data=input_data)
 
@@ -345,23 +394,13 @@ def doctor_cmd(
 def report_cmd(
     target: Path = typer.Argument(..., help="Archivo .c o binario a evaluar.", exists=True),
     output: Optional[Path] = typer.Option(None, "--output", "-o", help="Ruta de destino del archivo Markdown."),
-    faults_str: Optional[str] = typer.Option(None, "--faults", "-f", help="Especificación de fallos."),
+    faults_str: Optional[str] = typer.Option(None, "--faults", "-f", help="Especificación de fallos (e.g. 'malloc:1,fopen:2,write:ENOSPC')."),
     input_data: str = typer.Option("", "--input", "-i", help="Entrada estándar."),
 ):
     """Genera directamente la sección de reporte Markdown de VASQUEZ para Dredd."""
-    scenarios = []
-    if faults_str:
-        for item in faults_str.split(","):
-            parts = item.strip().split(":")
-            if parts:
-                f_type_str = parts[0].lower()
-                f_num = int(parts[1]) if len(parts) > 1 else 1
-                if f_type_str == "malloc":
-                    scenarios.append(FaultConfig(fault_type=FaultType.MALLOC_FAIL, fail_at_invocation=f_num))
-                elif f_type_str == "fopen":
-                    scenarios.append(FaultConfig(fault_type=FaultType.FOPEN_FAIL, fail_at_invocation=f_num, errno_value=13))
+    scenarios = parse_fault_spec(faults_str) if faults_str else None
 
-    report = evaluate_robustness(target, scenarios=scenarios if scenarios else None, input_data=input_data)
+    report = evaluate_robustness(target, scenarios=scenarios, input_data=input_data)
     md_content = generar_seccion_markdown(report)
     if output:
         output.parent.mkdir(parents=True, exist_ok=True)
@@ -369,6 +408,10 @@ def report_cmd(
         console.print(f"[bold green]✓ Reporte Markdown generado en:[/bold green] {output}")
     else:
         print(md_content)
+
+    if not report.passed:
+        raise typer.Exit(code=1)
+    raise typer.Exit(code=0)
 
 
 @app.command()

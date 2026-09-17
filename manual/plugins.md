@@ -17,60 +17,66 @@ Esta guía técnica detalla cómo desarrollar extensiones, crear nuevos plugins 
 (manual-vasquez-plugins-arquitectura)=
 ## 1. Arquitectura de Extensión
 
-`vasquez` provee una arquitectura modular desacoplada basada en puntos de entrada (Entry Points) estándar de Python (`[project.entry-points]`) o interfaces de inyección funcional:
+`vasquez` provee integración con el ecosistema docente a través del sistema de plugins de `ripley` y puntos de extensión programáticos en Python y C:
 
 - **Mecanismo de Extensión Principal**: `Interceptores de Inyección en Runtime (LD_PRELOAD)`.
-- **Punto de Entrada Oficial**: `vasquez.interceptors`.
-- **Formato de Comunicación**: Estructuras de datos serializables JSON / Pydantic models.
+- **Punto de Entrada Oficial en el Ecosistema**: `ripley.plugins` (`fault_injection`).
+- **Formato de Comunicación**: Modelos Pydantic tipados y estructuras serializables JSON.
 
 ---
 
 (manual-vasquez-plugins-tutorial)=
-## 2. Desarrollo Paso a Paso de un Plugin
+## 2. Desarrollo Paso a Paso de un Plugin para Ripley
+
+`vasquez` se integra en el microkernel `ripley` exponiendo su motor de evaluación de robustez defensiva.
 
 ### Paso 1: Definir la Clase del Plugin
 
-Creá un archivo Python (por ejemplo `mi_plugin.py`) e implementá la interfaz requerida:
+Creá una clase que implemente la interfaz estándar de plugins de Ripley:
 
 ````{code-block} python
 :linenos:
-from vasquez.core.models import FaultConfig, FaultType
+from pathlib import Path
+from typing import Dict, Any
+from vasquez.core.fault_runner import evaluate_robustness
 
-class InterceptorSocket:
-    """Simula desconexión de red o fallo en socket()."""
-    name = "socket_failure"
+class MiPluginInyeccion:
+    """Plugin de auditoría de robustez para el microkernel Ripley."""
+    name = "mi_inyeccion"
+    description = "Evalúa manejo de fallos en llamadas de sistema."
 
-    def generate_c_wrapper(self) -> str:
-        return """
-        int socket(int domain, int type, int protocol) {
-            if (should_fail("socket")) {
-                errno = ECONNREFUSED;
-                return -1;
-            }
-            return real_socket(domain, type, protocol);
+    def run(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        target = Path(context.get("source_dir", ".")) / "main.c"
+        if not target.exists():
+            return {"passed": True, "message": "main.c no encontrado"}
+
+        report = evaluate_robustness(target)
+        return {
+            "passed": report.passed,
+            "crashed": report.crashed_scenarios_count,
+            "total": report.total_scenarios_tested,
         }
-        """
 ````
 
 ### Paso 2: Registrar el Plugin en `pyproject.toml`
 
-Para que `vasquez` descubra y cargue automáticamente tu plugin, agregalo en tu `pyproject.toml`:
+Para que `ripley` descubra y cargue automáticamente el plugin, registralo bajo el entry-point `ripley.plugins`:
 
 ````{code-block} toml
-[project.entry-points."vasquez.interceptors"]
-mi_plugin = "mi_paquete.modulo:MiPlugin"
+[project.entry-points."ripley.plugins"]
+mi_inyeccion = "mi_paquete.modulo:MiPluginInyeccion"
 ````
 
 ### Paso 3: Instalar y Verificar el Plugin
 
-Instalá tu extensión en modo editable y comprobá que `vasquez` la reconozca:
+Instalá tu extensión en modo editable y comprobá su registro:
 
 ````{code-block} bash
 # Instalación local
 pip install -e .
 
-# Verificación de plugins registrados
-vasquez plugins list
+# Verificación a través del catálogo de ripley
+ripley doctor
 ````
 
 ---

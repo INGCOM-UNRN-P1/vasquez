@@ -66,6 +66,12 @@ static int fopen_errno = 13; // EACCES
 static size_t bytes_written_total = 0;
 static long   fail_write_after_bytes = -1;
 
+static int fread_call_count = 0;
+static int fread_fail_at = -1;
+
+static int fclose_call_count = 0;
+static int fclose_fail_at = -1;
+
 static int trace_fd = -1;
 static __thread int in_hook = 0;
 
@@ -145,11 +151,25 @@ static void init_vasquez(void) {
     char *env_write_after = getenv("VASQUEZ_FAIL_WRITE_AFTER_BYTES");
     if (env_write_after) fail_write_after_bytes = atol(env_write_after);
 
+    char *env_fread = getenv("VASQUEZ_FREAD_FAIL_AT");
+    if (env_fread) fread_fail_at = atoi(env_fread);
+
+    char *env_fclose = getenv("VASQUEZ_FCLOSE_FAIL_AT");
+    if (env_fclose) fclose_fail_at = atoi(env_fclose);
+
     char *env_trace = getenv("VASQUEZ_TRACE_FILE");
     if (env_trace) {
         trace_fd = open(env_trace, O_WRONLY | O_CREAT | O_APPEND, 0644);
         if (trace_fd >= 0) {
             log_trace("[VASQUEZ] Trace inicializado. PID: %d", getpid());
+        }
+    } else {
+        char *env_trace_stderr = getenv("VASQUEZ_TRACE");
+        if (env_trace_stderr && atoi(env_trace_stderr) > 0) {
+            trace_fd = dup(STDERR_FILENO);
+            if (trace_fd >= 0) {
+                log_trace("[VASQUEZ] Trace a stderr inicializado. PID: %d", getpid());
+            }
         }
     }
 }
@@ -378,6 +398,13 @@ size_t fread(void *ptr, size_t size, size_t nmemb, FILE *stream) {
         return real_fread ? real_fread(ptr, size, nmemb, stream) : 0;
     }
     in_hook = 1;
+    fread_call_count++;
+    if (cascade_active || (fread_fail_at > 0 && fread_call_count >= fread_fail_at)) {
+        log_trace("[VASQUEZ] fread llamada #%d -> 0 [FALLO FORZADO I/O%s]", fread_call_count, cascade_active ? " - CASCADA" : "");
+        trigger_cascade();
+        in_hook = 0;
+        return 0;
+    }
     size_t r = real_fread(ptr, size, nmemb, stream);
     log_trace("[VASQUEZ] fread(%zu bytes) -> %zu", size * nmemb, r);
     in_hook = 0;
@@ -390,6 +417,15 @@ int fclose(FILE *stream) {
         return real_fclose ? real_fclose(stream) : 0;
     }
     in_hook = 1;
+    fclose_call_count++;
+    if (cascade_active || (fclose_fail_at > 0 && fclose_call_count >= fclose_fail_at)) {
+        errno = 5; // EIO
+        log_trace("[VASQUEZ] fclose llamada #%d -> EOF [FALLO FORZADO I/O%s]", fclose_call_count, cascade_active ? " - CASCADA" : "");
+        trigger_cascade();
+        real_fclose(stream);
+        in_hook = 0;
+        return EOF;
+    }
     int res = real_fclose(stream);
     log_trace("[VASQUEZ] fclose(%p) -> %d", (void*)stream, res);
     in_hook = 0;
