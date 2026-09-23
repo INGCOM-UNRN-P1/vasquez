@@ -45,8 +45,9 @@ def main(
 
 def generar_seccion_markdown(report: RobustnessReport) -> str:
     """Genera sección de inyección de fallos y programación defensiva para Dredd."""
+    status = "ok" if report.passed else "fail"
     lines = [
-        "<!-- dredd-section: vasquez v1.0.0 -->\n",
+        f"<!-- dredd-section: vasquez, tool=vasquez, version=1.0.0, status={status} -->\n",
         "## Inyección de Fallos y Programación Defensiva (Vasquez)\n",
     ]
     lines.append(f"- **Archivo analizado:** `{Path(report.target_binary).name}`")
