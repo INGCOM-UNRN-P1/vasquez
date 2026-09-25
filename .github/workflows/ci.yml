@@ -28,3 +28,36 @@ jobs:
 
       - name: Ejecutar suite de pruebas
         run: uv run pytest -q
+
+  test-windows:
+    name: Test Windows (MSYS2 UCRT64, interceptación en enlace)
+    runs-on: windows-2025
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Instalar GCC UCRT64 (mismo toolchain que el entorno de la cátedra)
+        id: msys2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          install: mingw-w64-ucrt-x86_64-gcc
+
+      - name: Exponer gcc y objcopy de UCRT64 en el PATH
+        shell: pwsh
+        run: Add-Content -Path $env:GITHUB_PATH -Value "${{ steps.msys2.outputs.msys2-location }}\ucrt64\bin"
+
+      - name: Instalar uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Sincronizar dependencias
+        run: uv sync --all-extras
+
+      - name: Diagnóstico del entorno
+        run: uv run vasquez doctor
+
+      - name: Ejecutar suite de pruebas
+        run: uv run pytest -q
