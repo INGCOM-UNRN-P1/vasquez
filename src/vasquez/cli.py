@@ -1,6 +1,7 @@
 """CLI principal de VASQUEZ."""
 
 from __future__ import annotations
+import sys
 import json
 from pathlib import Path
 from typing import Optional, List
@@ -13,6 +14,24 @@ from vasquez import __version__
 from vasquez.core.models import RobustnessReport, FaultConfig, FaultType, FaultRunResult
 from vasquez.core.fault_runner import evaluate_robustness, run_single_fault_scenario
 from vasquez.core.doctor import ejecutar_diagnostico_doctor
+
+
+
+def _forzar_utf8(stream) -> None:
+    """En Windows, pasa a UTF-8 un flujo redirigido (archivo, pipe, CI) que usa la página de códigos ANSI.
+
+    La consola de Windows ya escribe en UTF-16 sin importar la codificación; pero al redirigir,
+    Python usa cp1252 y no puede codificar símbolos como '✓' o '❌', abortando con UnicodeEncodeError.
+    """
+    if sys.platform != "win32" or stream is None:
+        return
+    encoding = (getattr(stream, "encoding", None) or "").lower().replace("-", "")
+    if encoding != "utf8" and hasattr(stream, "reconfigure"):
+        stream.reconfigure(encoding="utf-8", errors="replace")
+
+
+_forzar_utf8(sys.stdout)
+_forzar_utf8(sys.stderr)
 
 app = typer.Typer(
     name="vasquez",

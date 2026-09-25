@@ -309,3 +309,25 @@ def test_cli_qol_options(tmp_path):
     assert res.exit_code == 0
     assert '"free_null_calls": 1' in res.output
 
+
+
+def test_salida_redirigida_en_windows_usa_utf8(monkeypatch):
+    import io
+    from vasquez.cli import _forzar_utf8
+
+    stream = io.TextIOWrapper(io.BytesIO(), encoding="cp1252")
+    monkeypatch.setattr(sys, "platform", "win32")
+    _forzar_utf8(stream)
+    stream.write("\u2713 Diagnóstico \u274c")
+    stream.flush()
+    assert stream.buffer.getvalue().decode("utf-8") == "\u2713 Diagnóstico \u274c"
+
+
+def test_salida_fuera_de_windows_no_se_modifica(monkeypatch):
+    import io
+    from vasquez.cli import _forzar_utf8
+
+    stream = io.TextIOWrapper(io.BytesIO(), encoding="cp1252")
+    monkeypatch.setattr(sys, "platform", "linux")
+    _forzar_utf8(stream)
+    assert stream.encoding == "cp1252"
