@@ -1,5 +1,7 @@
 # VASQUEZ — Motor de Inyección de Fallos de Entorno en C (Fault Injection Engine)
 
+> 📖 **Manual de Usuario:** Para una guía exhaustiva de comandos, banderas, arquitectura y ejemplos, consultá el [Manual de Uso](MANUAL.md).
+
 **VASQUEZ** intercepta llamadas estándar a la biblioteca de C (`malloc`, `calloc`, `realloc`, `strdup`, `fopen`, `fwrite`, `fread`, `fclose`) mediante `LD_PRELOAD` para inyectar fallos deterministas en tiempo de ejecución (retornos `NULL` o códigos de error simulando falta de memoria o accesos denegados a disco), verificando si el estudiante implementó manejo defensivo de errores o si el programa sufre un `SIGSEGV`.
 
 ---
