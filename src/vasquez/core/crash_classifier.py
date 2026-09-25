@@ -3,6 +3,26 @@
 from __future__ import annotations
 from typing import Optional, Tuple
 from vasquez.core.models import FaultConfig, FaultType
+# Códigos de salida con que Windows termina un proceso ante una excepción no manejada (NTSTATUS)
+# o un abort() del UCRT, traducidos a la señal POSIX equivalente para reutilizar la
+# clasificación pedagógica.
+# traducidos a la señal POSIX equivalente para reutilizar la clasificación pedagógica.
+NTSTATUS_A_SENAL = {
+    0xC0000005: "SIGSEGV",  # STATUS_ACCESS_VIOLATION
+    0xC00000FD: "SIGSEGV",  # STATUS_STACK_OVERFLOW
+    0xC0000374: "SIGABRT",  # STATUS_HEAP_CORRUPTION (p. ej. double free)
+    0xC0000409: "SIGABRT",  # STATUS_STACK_BUFFER_OVERRUN / __fastfail (abort del UCRT)
+    3: "SIGABRT",           # _exit(3) de abort()/assert() del UCRT cuando no usa __fastfail
+    0x80000002: "SIGBUS",   # STATUS_DATATYPE_MISALIGNMENT
+    0xC0000094: "SIGFPE",   # STATUS_INTEGER_DIVIDE_BY_ZERO
+    0xC000008E: "SIGFPE",   # STATUS_FLOAT_DIVIDE_BY_ZERO
+    0xC000001D: "SIGILL",   # STATUS_ILLEGAL_INSTRUCTION
+}
+
+
+def senal_desde_codigo_windows(exit_code: int) -> Optional[str]:
+    """Traduce el código de salida de un proceso Windows a la señal POSIX equivalente, si la hay."""
+    return NTSTATUS_A_SENAL.get(exit_code & 0xFFFFFFFF)
 
 
 def classify_execution(

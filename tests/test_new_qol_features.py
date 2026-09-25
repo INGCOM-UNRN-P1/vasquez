@@ -1,5 +1,7 @@
 """Tests de las funcionalidades QoL y subcomandos de VASQUEZ."""
 
+import sys
+import pytest
 from pathlib import Path
 from typer.testing import CliRunner
 from vasquez.cli import app
@@ -23,6 +25,7 @@ def test_doctor_execution():
     assert '"all_ok": true' in res.output
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="LD_PRELOAD no existe en Windows nativo")
 def test_cache_injector_compilation():
     so_path = get_cached_injector_library()
     assert so_path.exists()
@@ -77,7 +80,7 @@ def test_calloc_and_realloc_interception(tmp_path):
         int *n_arr = realloc(arr, 10 * sizeof(int));
         if (n_arr == NULL) {
             free(arr);
-            return 3;
+            return 5; // 3 se reserva: en Windows es el código de abort()
         }
         free(n_arr);
         return 0;
@@ -91,7 +94,7 @@ def test_calloc_and_realloc_interception(tmp_path):
     # 2. Fallar en realloc
     rep2 = evaluate_robustness(src, [FaultConfig(fault_type=FaultType.REALLOC_FAIL, fail_at_invocation=2)])
     assert rep2.passed is True
-    assert rep2.results[0].exit_code == 3
+    assert rep2.results[0].exit_code == 5
 
 
 def test_fail_write_after_bytes(tmp_path):

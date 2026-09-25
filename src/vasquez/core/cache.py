@@ -5,6 +5,7 @@ import os
 import hashlib
 from pathlib import Path
 from vasquez.core.injector_c import INJECTOR_C_SOURCE, compile_preload_library
+from vasquez.core.injector_link import INJECTOR_LINK_C_SOURCE, compile_link_object
 
 
 def get_cached_injector_library() -> Path:
@@ -21,3 +22,17 @@ def get_cached_injector_library() -> Path:
         compile_preload_library(so_path)
 
     return so_path
+
+
+def get_cached_link_object() -> Path:
+    """Obtiene el objeto inyector para interceptación en enlace, compilándolo sólo si cambió el hash fuente."""
+    cache_dir = Path.home() / ".cache" / "vasquez"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    c_hash = hashlib.sha256(INJECTOR_LINK_C_SOURCE.encode("utf-8")).hexdigest()[:16]
+    obj_path = cache_dir / f"libvasquez_link_{c_hash}.o"
+
+    if not obj_path.exists() or obj_path.stat().st_size == 0:
+        compile_link_object(obj_path)
+
+    return obj_path

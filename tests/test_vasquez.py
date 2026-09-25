@@ -115,13 +115,13 @@ def test_fread_and_fclose_fault_injection(tmp_path):
         char buf[10];
         size_t r = fread(buf, 1, 5, f);
         fclose(f);
-        if (r == 0) return 3; // Manejó error de lectura
+        if (r == 0) return 5; // Manejó error de lectura (3 es el código de abort() en Windows)
         return 0;
     }
     """)
     rep_fread = evaluate_robustness(src_fread, [FaultConfig(fault_type=FaultType.FREAD_FAIL, fail_fread_at=1)])
     assert rep_fread.passed is True
-    assert rep_fread.results[0].exit_code == 3
+    assert rep_fread.results[0].exit_code == 5
 
     src_fclose = tmp_path / "test_fclose.c"
     src_fclose.write_text("""

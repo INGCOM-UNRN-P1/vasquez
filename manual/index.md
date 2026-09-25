@@ -86,7 +86,8 @@ brew install gcc gdb clang-format typst graphviz uv
 
 ```{tab-item} Windows (MSYS2 / WSL2)
 # En WSL2 (Ubuntu): utilizar los paquetes de Ubuntu/Debian arriba.
-# En MSYS2 MINGW64:
+# En MSYS2 MINGW64 (en UCRT64, usar el prefijo mingw-w64-ucrt-x86_64-).
+# Sin LD_PRELOAD, vasquez intercepta al enlazar: requiere el fuente .c (ver README).
 pacman -S --needed \
     mingw-w64-x86_64-gcc \
     mingw-w64-x86_64-gdb \
@@ -175,7 +176,7 @@ A continuación se detallan los subcomandos principales disponibles en `vasquez`
 | `vasquez inject --target ./bin/programa --fail-malloc-at 3` | Fuerza a que la 3ra llamada a malloc() devuelva NULL. |
 | `vasquez inject --target ./bin/programa --faults "fopen:1,malloc:2"` | Simula fallos secuenciales en apertura de archivos y memoria. |
 | `vasquez check-leaks ./bin/programa` | Verifica que el programa no pierda memoria en los caminos de error. |
-| `vasquez doctor` | Verifica que el compilador y soporte de LD_PRELOAD funcionen correctamente. |
+| `vasquez doctor` | Verifica que el compilador y el mecanismo de inyección de la plataforma funcionen (LD_PRELOAD en Linux/macOS, interceptación en enlace con `objcopy` en Windows nativo). |
 
 ````{tip}
 Podés agregar el flag `--json` a la mayoría de los comandos para exportar resultados en formato estructurado o `--md` para generar reportes Markdown para el informe de entrega.

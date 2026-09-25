@@ -25,9 +25,11 @@
 
 ### Requisitos de Sistema y Entorno
 - Linux / POSIX compatible con `LD_PRELOAD`. Python >= 3.11.
+- Windows nativo (GCC MinGW-w64 UCRT64 de MSYS2): soportado mediante interceptación en enlace; ver [Windows nativo](#windows-nativo-interceptación-en-enlace).
 
 ### Dependencias Externas y Binarios
 - `gcc` (para compilar la biblioteca interceptora nativa).
+- `objcopy` (binutils; sólo en Windows nativo, se instala junto con `gcc` en UCRT64).
 
 ### Integración en el Ecosistema
 - CLI `vasquez`.
@@ -49,6 +51,23 @@ vasquez inject app --faults "malloc:2,fopen:1"
 # Salida estructurada JSON
 vasquez inject solucion_alumno.c --json
 ```
+
+## Windows nativo (interceptación en enlace)
+
+Windows no tiene `LD_PRELOAD` ni `<dlfcn.h>`, y los ejecutables PE no admiten precarga de librerías. En esa plataforma VASQUEZ elige automáticamente otra vía:
+
+1. Compila el `.c` del alumno a objeto con los mismos flags que en Linux (`-O0 -g -fno-builtin-free`).
+2. Con `objcopy --redefine-sym` redirige en ese objeto las referencias a `malloc`, `calloc`, `realloc`, `strdup`/`_strdup`, `free`, `fopen`, `fwrite`, `fread` y `fclose` hacia los ganchos `vasquez_hook_*`.
+3. Enlaza el resultado con el objeto inyector (`~/.cache/vasquez/libvasquez_link_<hash>.o`), que lee las mismas variables `VASQUEZ_*` que la librería de Linux.
+
+Diferencias respecto de la vía `LD_PRELOAD`:
+
+- **Requiere el fuente `.c`**: un binario ya compilado no puede instrumentarse y se rechaza con un error.
+- **Sólo cuenta las llamadas del código del alumno.** En Linux, `LD_PRELOAD` ve también las reservas internas de glibc (por ejemplo, el buffer de `stdout` que reserva el primer `printf`), así que `malloc:1` puede caer en esa reserva. En Windows, `malloc:1` es siempre el primer `malloc` escrito por el alumno.
+- `posix_memalign` no existe en UCRT, así que no se intercepta.
+- Las caídas se detectan por el código de salida: `0xC0000005` (violación de acceso) se informa como `SIGSEGV`; `0xC0000374` (heap corrupto, p. ej. double free), `0xC0000409` (`__fastfail`) y `3` (`abort()`/`assert()` del UCRT) como `SIGABRT`, entre otros. Como consecuencia, un programa que termina con `return 3` o `exit(3)` se clasifica como abort, no como salida controlada: conviene que los ejercicios usen otros códigos de error.
+
+`vasquez doctor` informa qué vía está activa y verifica `objcopy` y la compilación del objeto inyector.
 
 ## Intercepción Avanzada y Sintaxis de Fallos
 

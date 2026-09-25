@@ -434,8 +434,18 @@ int fclose(FILE *stream) {
 """
 
 
+def preload_soportado() -> bool:
+    """Indica si la plataforma admite precarga de librerías (LD_PRELOAD / DYLD_INSERT_LIBRARIES)."""
+    return sys.platform != "win32"
+
+
 def compile_preload_library(output_path: Path) -> Path:
     """Compila la librería compartida .so / .dylib para inyección de fallos."""
+    if not preload_soportado():
+        raise RuntimeError(
+            "LD_PRELOAD no existe en Windows nativo (GCC MinGW-w64/UCRT64 no provee <dlfcn.h>); "
+            "en esta plataforma VASQUEZ usa interceptación en enlace (ver injector_link)."
+        )
     output_path.parent.mkdir(parents=True, exist_ok=True)
     c_file = output_path.with_suffix(".c")
     c_file.write_text(INJECTOR_C_SOURCE, encoding="utf-8")

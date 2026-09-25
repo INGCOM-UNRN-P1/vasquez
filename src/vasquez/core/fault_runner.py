@@ -9,8 +9,10 @@ import subprocess
 from pathlib import Path
 from typing import List, Optional
 from vasquez.core.models import FaultConfig, FaultType, FaultRunResult, RobustnessReport
-from vasquez.core.cache import get_cached_injector_library
-from vasquez.core.crash_classifier import classify_execution
+from vasquez.core.cache import get_cached_injector_library, get_cached_link_object
+from vasquez.core.crash_classifier import classify_execution, senal_desde_codigo_windows
+from vasquez.core.injector_c import preload_soportado
+from vasquez.core.injector_link import MECANISMO_PRELOAD, MECANISMO_ENLACE, build_instrumented_binary
 from vasquez.core.leak_checker import analyze_trace_for_leaks, audit_free_null
 from vasquez.core.constants import (
     ENV_MALLOC_FAIL_AT,
@@ -30,20 +32,33 @@ from vasquez.core.constants import (
 )
 
 
+def mecanismo_por_defecto() -> str:
+    """Mecanismo de inyección de la plataforma: precarga donde exista, enlace en Windows nativo."""
+    return MECANISMO_PRELOAD if preload_soportado() else MECANISMO_ENLACE
+
+
 def run_single_fault_scenario(
     binary_path: Path,
     fault: FaultConfig,
     so_path: Optional[Path] = None,
     input_data: str = "",
-    timeout: float = 3.0
+    timeout: float = 3.0,
+    mecanismo: Optional[str] = None
 ) -> FaultRunResult:
-    """Ejecuta el binario inyectando un fallo determinado y analiza la respuesta."""
-    if not so_path or not so_path.exists():
-        so_path = get_cached_injector_library()
+    """Ejecuta el binario inyectando un fallo determinado y analiza la respuesta.
 
+    Con el mecanismo de enlace, ``binary_path`` debe haber sido construido con
+    ``build_instrumented_binary``: los ganchos ya están enlazados y sólo se configuran por entorno.
+    """
+    mecanismo = mecanismo or mecanismo_por_defecto()
     env = os.environ.copy()
-    preload_key = "DYLD_INSERT_LIBRARIES" if sys.platform == "darwin" else "LD_PRELOAD"
-    env[preload_key] = str(so_path.resolve())
+
+    if mecanismo == MECANISMO_PRELOAD:
+        if not so_path or not so_path.exists():
+            so_path = get_cached_injector_library()
+
+        preload_key = "DYLD_INSERT_LIBRARIES" if sys.platform == "darwin" else "LD_PRELOAD"
+        env[preload_key] = str(so_path.resolve())
 
     # Configuración de fallos de memoria específicos (Mejoras 11 y 16) y generales
     if fault.fail_realloc_at is not None and fault.fail_realloc_at > 0:
@@ -118,6 +133,8 @@ def run_single_fault_scenario(
                 signal_name = signal.Signals(sig_num).name
             except Exception:
                 signal_name = f"SIG_{sig_num}"
+        elif sys.platform == "win32":
+            signal_name = senal_desde_codigo_windows(exit_code)
 
         category, diag, handled = classify_execution(exit_code, signal_name, fault)
 
@@ -181,9 +198,18 @@ def run_single_fault_scenario(
 def evaluate_robustness(
     source_or_binary: Path,
     scenarios: Optional[List[FaultConfig]] = None,
-    input_data: str = ""
+    input_data: str = "",
+    mecanismo: Optional[str] = None
 ) -> RobustnessReport:
-    """Evalúa la robustez del programa ante una batería de fallos de entorno."""
+    """Evalúa la robustez del programa ante una batería de fallos de entorno.
+
+    ``mecanismo`` fuerza la vía de inyección (``"preload"`` o ``"enlace"``); por defecto se
+    usa la de la plataforma. La vía de enlace sólo admite fuentes ``.c``.
+    """
+    mecanismo = mecanismo or mecanismo_por_defecto()
+    if mecanismo == MECANISMO_ENLACE:
+        return _evaluate_robustness_enlace(source_or_binary, scenarios, input_data)
+
     so_path = get_cached_injector_library()
 
     with tempfile.TemporaryDirectory() as tmp_dir:
@@ -215,7 +241,7 @@ def evaluate_robustness(
         passed_count = 0
 
         for sc in scenarios:
-            res = run_single_fault_scenario(target_bin, sc, so_path=so_path, input_data=input_data)
+            res = run_single_fault_scenario(target_bin, sc, so_path=so_path, input_data=input_data, mecanismo=MECANISMO_PRELOAD)
             results.append(res)
             if res.handled_gracefully:
                 passed_count += 1
@@ -231,4 +257,46 @@ def evaluate_robustness(
             crashed_scenarios_count=crashed_count,
             results=results,
             passed=all_passed
+        )
+
+
+def _evaluate_robustness_enlace(
+    source: Path,
+    scenarios: Optional[List[FaultConfig]],
+    input_data: str
+) -> RobustnessReport:
+    """Vía de enlace: compila el fuente con los ganchos del inyector y ejecuta la batería."""
+    if source.suffix != ".c":
+        raise RuntimeError(
+            f"{source.name}: en esta plataforma la inyección se hace al enlazar y requiere el fuente .c; "
+            "los binarios ya compilados no pueden instrumentarse."
+        )
+
+    injector_obj = get_cached_link_object()
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        target_bin = build_instrumented_binary(source, Path(tmp_dir), injector_obj)
+
+        if not scenarios:
+            # Misma batería estándar que la vía LD_PRELOAD
+            scenarios = [
+                FaultConfig(fault_type=FaultType.MALLOC_FAIL, fail_at_invocation=1, enable_trace=True),
+                FaultConfig(fault_type=FaultType.MALLOC_FAIL, fail_at_invocation=2, enable_trace=True),
+                FaultConfig(fault_type=FaultType.FOPEN_FAIL, fail_at_invocation=1, errno_value=13),
+            ]
+
+        results = [
+            run_single_fault_scenario(target_bin, sc, input_data=input_data, mecanismo=MECANISMO_ENLACE)
+            for sc in scenarios
+        ]
+        passed_count = sum(1 for r in results if r.handled_gracefully)
+        crashed_count = len(results) - passed_count
+
+        return RobustnessReport(
+            target_binary=str(source),
+            total_scenarios_tested=len(results),
+            passed_scenarios_count=passed_count,
+            crashed_scenarios_count=crashed_count,
+            results=results,
+            passed=(crashed_count == 0)
         )
