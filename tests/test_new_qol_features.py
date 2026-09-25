@@ -180,6 +180,7 @@ def test_realloc_null_injection_qol11(tmp_path):
     assert rep.results[0].leaks_detected is False
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="UCRT no provee posix_memalign: el programa no compila en Windows")
 def test_posix_memalign_and_calloc_qol16(tmp_path):
     src = tmp_path / "memalign.c"
     src.write_text("""
