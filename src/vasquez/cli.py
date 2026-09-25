@@ -34,6 +34,7 @@ _forzar_utf8(sys.stdout)
 _forzar_utf8(sys.stderr)
 
 app = typer.Typer(
+    context_settings={"help_option_names": ["-h", "--help"]},
     name="vasquez",
     help="Motor de inyección de fallos de entorno y hardware en C vía LD_PRELOAD",
     add_completion=True
@@ -385,7 +386,21 @@ def doctor_cmd(
     """Audita el entorno y verifica la disponibilidad del compilador y la librería de inyección."""
     rep = ejecutar_diagnostico_doctor()
     if json_output:
-        print(json.dumps(rep.model_dump(), indent=2, ensure_ascii=False))
+        datos = rep.model_dump()
+        # Sobre común de `doctor --json` (N-ECO-04) + el modelo completo.
+        informe = {
+            "schema_version": "1.0.0",
+            "herramienta": "vasquez",
+            "version": __version__,
+            "ok": rep.all_ok,
+            "chequeos": [
+                {"nombre": c.name, "requerido": c.required, "ok": c.status == "OK",
+                 "detalle": c.version or c.detail}
+                for c in rep.checks
+            ],
+            **{k: v for k, v in datos.items() if k not in ("schema_version", "ok")},
+        }
+        print(json.dumps(informe, indent=2, ensure_ascii=False))
         raise typer.Exit(code=0 if rep.all_ok else 1)
 
     table = Table(title="Diagnóstico del Entorno (VASQUEZ Doctor)", show_header=True, header_style="bold red")
