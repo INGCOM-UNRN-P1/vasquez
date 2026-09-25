@@ -3,10 +3,10 @@
 from __future__ import annotations
 from typing import Optional, Tuple
 from vasquez.core.models import FaultConfig, FaultType
+
 # Códigos de salida con que Windows termina un proceso ante una excepción no manejada (NTSTATUS)
 # o un abort() del UCRT, traducidos a la señal POSIX equivalente para reutilizar la
 # clasificación pedagógica.
-# traducidos a la señal POSIX equivalente para reutilizar la clasificación pedagógica.
 NTSTATUS_A_SENAL = {
     0xC0000005: "SIGSEGV",  # STATUS_ACCESS_VIOLATION
     0xC00000FD: "SIGSEGV",  # STATUS_STACK_OVERFLOW
