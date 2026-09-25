@@ -45,12 +45,12 @@ vasquez = "vasquez.cli:app"
 [project.entry-points."ripley.plugins"]
 fault_injection = "vasquez.plugins.ripley_plugin:VasquezPlugin"
 
-[project.optional-dependencies]
-dev = [
-    "pytest>=7.4.0",
-]
-
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 pythonpath = ["src"]
+
+[dependency-groups]
+dev = [
+    "pytest>=7.4.0",
+]
