@@ -7,9 +7,11 @@ import signal
 import tempfile
 import subprocess
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Sequence
 from vasquez.core.models import FaultConfig, FaultType, FaultRunResult, RobustnessReport
 from vasquez.core.cache import get_cached_injector_library, get_cached_link_object
+from vasquez.core.compilacion import compilar
+from vasquez.core.errores import ErrorVasquez
 from vasquez.core.crash_classifier import classify_execution, senal_desde_codigo_windows
 from vasquez.core.injector_c import preload_soportado
 from vasquez.core.injector_link import MECANISMO_PRELOAD, MECANISMO_ENLACE, build_instrumented_binary
@@ -199,16 +201,27 @@ def evaluate_robustness(
     source_or_binary: Path,
     scenarios: Optional[List[FaultConfig]] = None,
     input_data: str = "",
-    mecanismo: Optional[str] = None
+    mecanismo: Optional[str] = None,
+    fuentes_extra: Sequence[Path] = (),
+    cflags: Sequence[str] = (),
 ) -> RobustnessReport:
     """Evalúa la robustez del programa ante una batería de fallos de entorno.
 
     ``mecanismo`` fuerza la vía de inyección (``"preload"`` o ``"enlace"``); por defecto se
     usa la de la plataforma. La vía de enlace sólo admite fuentes ``.c``.
+
+    Un programa de varios archivos se evalúa pasando los demás ``.c`` en ``fuentes_extra``;
+    ``cflags`` agrega flags a gcc (``-I include``, ``-std=c11``...). Si el programa no compila
+    se lanza ``ErrorDeCompilacion`` con la salida de gcc.
     """
+    if fuentes_extra and source_or_binary.suffix != ".c":
+        raise ErrorVasquez(
+            f"{source_or_binary.name} no es un fuente .c: los archivos adicionales solo se combinan con fuentes, "
+            "no con un binario ya compilado."
+        )
     mecanismo = mecanismo or mecanismo_por_defecto()
     if mecanismo == MECANISMO_ENLACE:
-        return _evaluate_robustness_enlace(source_or_binary, scenarios, input_data)
+        return _evaluate_robustness_enlace(source_or_binary, scenarios, input_data, fuentes_extra, cflags)
 
     so_path = get_cached_injector_library()
 
@@ -216,15 +229,7 @@ def evaluate_robustness(
         tmp_path = Path(tmp_dir)
 
         if source_or_binary.suffix == ".c":
-            bin_path = tmp_path / "target_app"
-            comp = subprocess.run(
-                ["gcc", "-O0", "-g", "-fno-builtin-free", str(source_or_binary), "-o", str(bin_path)],
-                capture_output=True,
-                check=False
-            )
-            if comp.returncode != 0:
-                raise RuntimeError(f"Error compilando {source_or_binary}: {comp.stderr.decode('utf-8', errors='replace')}")
-            target_bin = bin_path
+            target_bin = compilar([source_or_binary, *fuentes_extra], tmp_path / "target_app", cflags)
         else:
             target_bin = source_or_binary
 
@@ -263,11 +268,13 @@ def evaluate_robustness(
 def _evaluate_robustness_enlace(
     source: Path,
     scenarios: Optional[List[FaultConfig]],
-    input_data: str
+    input_data: str,
+    fuentes_extra: Sequence[Path] = (),
+    cflags: Sequence[str] = (),
 ) -> RobustnessReport:
     """Vía de enlace: compila el fuente con los ganchos del inyector y ejecuta la batería."""
     if source.suffix != ".c":
-        raise RuntimeError(
+        raise ErrorVasquez(
             f"{source.name}: en esta plataforma la inyección se hace al enlazar y requiere el fuente .c; "
             "los binarios ya compilados no pueden instrumentarse."
         )
@@ -275,7 +282,7 @@ def _evaluate_robustness_enlace(
     injector_obj = get_cached_link_object()
 
     with tempfile.TemporaryDirectory() as tmp_dir:
-        target_bin = build_instrumented_binary(source, Path(tmp_dir), injector_obj)
+        target_bin = build_instrumented_binary(source, Path(tmp_dir), injector_obj, fuentes_extra, cflags)
 
         if not scenarios:
             # Misma batería estándar que la vía LD_PRELOAD

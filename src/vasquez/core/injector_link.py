@@ -16,7 +16,10 @@ import sys
 import shutil
 import subprocess
 from pathlib import Path
-from typing import List
+from typing import List, Sequence
+
+from vasquez.core.compilacion import compilar
+from vasquez.core.errores import ErrorDeCompilacion, ErrorVasquez
 
 HOOK_PREFIX = "vasquez_hook_"
 
@@ -426,14 +429,17 @@ def compile_link_object(output_path: Path) -> Path:
     c_file = output_path.with_suffix(".c")
     c_file.write_text(INJECTOR_LINK_C_SOURCE, encoding="utf-8")
 
-    res = subprocess.run(
-        ["gcc", "-c", "-O2", str(c_file), "-o", str(output_path)],
-        capture_output=True,
-        text=True,
-        check=False
-    )
+    try:
+        res = subprocess.run(
+            ["gcc", "-c", "-O2", str(c_file), "-o", str(output_path)],
+            capture_output=True,
+            text=True,
+            check=False
+        )
+    except FileNotFoundError:
+        raise ErrorVasquez("No se encontró gcc en el PATH; ejecutá `vasquez doctor` para ver cómo instalarlo.") from None
     if res.returncode != 0:
-        raise RuntimeError(f"Fallo al compilar el objeto inyector de enlace: {res.stderr}")
+        raise ErrorVasquez(f"Fallo al compilar el objeto inyector de enlace: {res.stderr}")
 
     return output_path
 
@@ -448,40 +454,43 @@ def argumentos_redefinicion(plataforma: str | None = None) -> List[str]:
     return args
 
 
-def build_instrumented_binary(source: Path, work_dir: Path, injector_obj: Path) -> Path:
-    """Compila el fuente del alumno enlazándolo con los ganchos del inyector.
+def build_instrumented_binary(
+    source: Path,
+    work_dir: Path,
+    injector_obj: Path,
+    fuentes_extra: Sequence[Path] = (),
+    cflags: Sequence[str] = (),
+) -> Path:
+    """Compila el fuente del alumno (y sus módulos) enlazándolo con los ganchos del inyector.
 
     Usa los mismos flags de compilación que la vía LD_PRELOAD para que el comportamiento
-    observado sea comparable.
+    observado sea comparable. Cada fuente se compila a un objeto propio y se le redirigen
+    los símbolos interceptados antes de enlazar.
     """
     objcopy = buscar_objcopy()
     if not objcopy:
-        raise RuntimeError("No se encontró 'objcopy' (binutils) en el PATH; es necesario para la interceptación en enlace.")
+        raise ErrorVasquez("No se encontró 'objcopy' (binutils) en el PATH; es necesario para la interceptación en enlace.")
 
-    obj = work_dir / "target_app.o"
-    comp = subprocess.run(
-        ["gcc", "-O0", "-g", "-fno-builtin-free", "-c", str(source), "-o", str(obj)],
-        capture_output=True,
-        check=False
-    )
-    if comp.returncode != 0:
-        raise RuntimeError(f"Error compilando {source}: {comp.stderr.decode('utf-8', errors='replace')}")
-
-    redef = subprocess.run(
-        [objcopy, *argumentos_redefinicion(), str(obj)],
-        capture_output=True,
-        check=False
-    )
-    if redef.returncode != 0:
-        raise RuntimeError(f"Error redirigiendo símbolos con objcopy: {redef.stderr.decode('utf-8', errors='replace')}")
+    fuentes = [source, *fuentes_extra]
+    objetos = []
+    for i, fuente in enumerate(fuentes):
+        obj = compilar([fuente], work_dir / (f"target_app_{i}.o" if i else "target_app.o"), cflags, solo_objeto=True)
+        redef = subprocess.run(
+            [objcopy, *argumentos_redefinicion(), str(obj)],
+            capture_output=True,
+            check=False
+        )
+        if redef.returncode != 0:
+            raise ErrorVasquez(f"Error redirigiendo símbolos con objcopy: {redef.stderr.decode('utf-8', errors='replace')}")
+        objetos.append(obj)
 
     bin_path = work_dir / ("target_app.exe" if sys.platform == "win32" else "target_app")
     link = subprocess.run(
-        ["gcc", str(obj), str(injector_obj), "-o", str(bin_path)],
+        ["gcc", *map(str, objetos), str(injector_obj), "-o", str(bin_path)],
         capture_output=True,
         check=False
     )
     if link.returncode != 0:
-        raise RuntimeError(f"Error enlazando {source} con el inyector: {link.stderr.decode('utf-8', errors='replace')}")
+        raise ErrorDeCompilacion(fuentes, link.stderr.decode("utf-8", errors="replace"))
 
     return bin_path

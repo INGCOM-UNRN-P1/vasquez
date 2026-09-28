@@ -52,7 +52,18 @@ vasquez inject app --faults "malloc:2,fopen:1"
 
 # Salida estructurada JSON
 vasquez inject solucion_alumno.c --json
+
+# Proyecto de varios archivos: el .c con main, sus módulos y la carpeta de headers
+vasquez check src/main.c src/lista.c src/procesador.c -I include
+
+# Flags adicionales para gcc
+vasquez check src/main.c src/lista.c -I include --cflags "-std=c11 -DDEBUG"
 ```
+
+`inject`/`check`, `stress` y `report` salen con `0` si el programa resiste todos los
+fallos, `1` si alguno lo hace caer y `2` si no se pudo evaluar. Si el programa no
+compila, VASQUEZ muestra el error de gcc con una pista (falta `-I`, falta el archivo
+con `main`, faltan módulos) en lugar de un traceback.
 
 ## Windows nativo (interceptación en enlace)
 

@@ -42,6 +42,13 @@ from test_new_qol_features import (  # noqa: F401
     test_garbage_memory_poisoning_qol25,
     test_cli_qol_options,
 )
+from test_varios_archivos import (  # noqa: F401
+    test_cli_evalua_un_proyecto_de_varios_archivos,
+    test_cli_header_en_otra_carpeta_explica_como_seguir,
+    test_cli_modulo_sin_main_explica_como_seguir,
+    test_error_de_compilacion_conserva_la_salida_de_gcc,
+    test_plugin_ripley_con_proyecto_de_varios_archivos,
+)
 
 runner = CliRunner()
 

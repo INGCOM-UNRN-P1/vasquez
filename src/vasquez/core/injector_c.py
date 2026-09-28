@@ -6,6 +6,8 @@ import sys
 import subprocess
 from pathlib import Path
 
+from vasquez.core.errores import ErrorVasquez
+
 INJECTOR_C_SOURCE = r"""
 #define _GNU_SOURCE
 #include <stdio.h>
@@ -442,7 +444,7 @@ def preload_soportado() -> bool:
 def compile_preload_library(output_path: Path) -> Path:
     """Compila la librería compartida .so / .dylib para inyección de fallos."""
     if not preload_soportado():
-        raise RuntimeError(
+        raise ErrorVasquez(
             "LD_PRELOAD no existe en Windows nativo (GCC MinGW-w64/UCRT64 no provee <dlfcn.h>); "
             "en esta plataforma VASQUEZ usa interceptación en enlace (ver injector_link)."
         )
@@ -456,13 +458,16 @@ def compile_preload_library(output_path: Path) -> Path:
     else:
         compile_flags.extend(["-ldl"])
 
-    res = subprocess.run(
-        compile_flags,
-        capture_output=True,
-        text=True,
-        check=False
-    )
+    try:
+        res = subprocess.run(
+            compile_flags,
+            capture_output=True,
+            text=True,
+            check=False
+        )
+    except FileNotFoundError:
+        raise ErrorVasquez("No se encontró gcc en el PATH; ejecutá `vasquez doctor` para ver cómo instalarlo.") from None
     if res.returncode != 0:
-        raise RuntimeError(f"Fallo al compilar libvasquez_preload: {res.stderr}")
+        raise ErrorVasquez(f"Fallo al compilar libvasquez_preload: {res.stderr}")
 
     return output_path

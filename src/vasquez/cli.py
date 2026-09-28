@@ -3,10 +3,12 @@
 from __future__ import annotations
 import sys
 import json
+import shlex
 from pathlib import Path
 from typing import Optional, List
 import typer
 from rich.console import Console
+from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
 
@@ -14,7 +16,7 @@ from vasquez import __version__
 from vasquez.core.models import RobustnessReport, FaultConfig, FaultType, FaultRunResult
 from vasquez.core.fault_runner import evaluate_robustness, run_single_fault_scenario
 from vasquez.core.doctor import ejecutar_diagnostico_doctor
-
+from vasquez.core.errores import ErrorDeCompilacion, ErrorVasquez, pista_de_compilacion
 
 
 def _forzar_utf8(stream) -> None:
@@ -40,6 +42,46 @@ app = typer.Typer(
     add_completion=True
 )
 console = Console()
+err_console = Console(stderr=True)
+
+# Códigos de salida de inject/check, stress y report.
+SALIDA_ROBUSTO, SALIDA_NO_ROBUSTO, SALIDA_NO_EVALUABLE = 0, 1, 2
+
+AYUDA_FUENTES = "Fuente(s) .c del programa (el que tiene main y sus módulos) o un binario ya compilado."
+AYUDA_INCLUDE = "Carpeta de headers para gcc (como -I); se puede repetir."
+AYUDA_CFLAGS = "Flags adicionales para gcc, entre comillas (por ejemplo: \"-std=c11 -DDEBUG\")."
+
+
+def _flags_de_compilacion(incluir: Optional[List[Path]], cflags: str) -> List[str]:
+    try:
+        extra = shlex.split(cflags or "")
+    except ValueError as error:
+        raise typer.BadParameter(f"--cflags mal formado: {error}.", param_hint="--cflags") from None
+    return [f"-I{d}" for d in incluir or []] + extra
+
+
+def _evaluar(
+    fuentes: List[Path],
+    scenarios: Optional[List[FaultConfig]],
+    input_data: str = "",
+    incluir: Optional[List[Path]] = None,
+    cflags: str = "",
+) -> RobustnessReport:
+    """Compila y evalúa; si el programa no se puede evaluar, lo explica y sale con 2 (N-VASQUEZ-02)."""
+    flags = _flags_de_compilacion(incluir, cflags)
+    try:
+        return evaluate_robustness(fuentes[0], scenarios=scenarios, input_data=input_data,
+                                   fuentes_extra=fuentes[1:], cflags=flags)
+    except ErrorDeCompilacion as error:
+        nombres = ", ".join(f.name for f in error.fuentes)
+        err_console.print(f"[bold red]Error:[/bold red] {escape(nombres)} no compila; VASQUEZ necesita un programa que compile.")
+        err_console.print(escape(error.salida), highlight=False)
+        pista = pista_de_compilacion(error.salida)
+        if pista:
+            err_console.print(f"[yellow]Pista:[/yellow] {escape(pista)}")
+    except ErrorVasquez as error:
+        err_console.print(f"[bold red]Error:[/bold red] {escape(str(error))}")
+    raise typer.Exit(code=SALIDA_NO_EVALUABLE)
 
 
 def version_callback(value: bool):
@@ -257,7 +299,9 @@ def build_cli_scenarios(
 @app.command("inject")
 @app.command("check")
 def inject(
-    target: Path = typer.Argument(..., help="Archivo .c o binario a evaluar bajo inyección de fallos", exists=True),
+    fuentes: List[Path] = typer.Argument(..., help=AYUDA_FUENTES, exists=True, dir_okay=False),
+    incluir: Optional[List[Path]] = typer.Option(None, "-I", "--include", help=AYUDA_INCLUDE),
+    cflags: str = typer.Option("", "--cflags", help=AYUDA_CFLAGS),
     faults_str: Optional[str] = typer.Option(None, "--faults", "-f", help="Especificación: 'malloc:1,malloc:2,fopen:1,fwrite:1024,write:ENOSPC'"),
     fail_malloc_at: Optional[int] = typer.Option(None, "--fail-malloc-at", help="Fallar en la llamada N a malloc."),
     fail_malloc_prob: Optional[float] = typer.Option(None, "--fail-malloc-prob", help="Probabilidad de fallo en malloc (0.0 a 1.0)."),
@@ -275,7 +319,11 @@ def inject(
     json_output: bool = typer.Option(False, "--json", help="Emitir salida en formato JSON estructurado"),
     output_md: Optional[Path] = typer.Option(None, "--md", "--output-md", help="Generar sección de reporte en formato Markdown para fusión en Dredd."),
 ):
-    """Inyecta fallos controlados (malloc/calloc/realloc NULL, cascada, memoria basura) evaluando la resiliencia del código C."""
+    """Inyecta fallos controlados (malloc/calloc/realloc NULL, cascada, memoria basura) evaluando la resiliencia del código C.
+
+    Sale con 0 si el programa resiste todos los fallos, 1 si alguno lo hace caer y 2 si no se pudo
+    evaluar (por ejemplo, porque no compila).
+    """
     scenarios = build_cli_scenarios(
         faults_str=faults_str,
         fail_malloc_at=fail_malloc_at,
@@ -292,7 +340,8 @@ def inject(
         check_leaks=check_leaks,
     )
 
-    report = evaluate_robustness(target, scenarios=scenarios if scenarios else None, input_data=input_data)
+    report = _evaluar(fuentes, scenarios if scenarios else None, input_data, incluir, cflags)
+    target = fuentes[0]
 
     if output_md:
         md_text = generar_seccion_markdown(report)
@@ -350,7 +399,9 @@ def inject(
 
 @app.command("stress")
 def stress_cmd(
-    target: Path = typer.Argument(..., help="Archivo .c o binario a evaluar bajo estrés probabilístico", exists=True),
+    fuentes: List[Path] = typer.Argument(..., help=AYUDA_FUENTES, exists=True, dir_okay=False),
+    incluir: Optional[List[Path]] = typer.Option(None, "-I", "--include", help=AYUDA_INCLUDE),
+    cflags: str = typer.Option("", "--cflags", help=AYUDA_CFLAGS),
     iterations: int = typer.Option(10, "--iterations", "-n", help="Cantidad de corridas bajo inyección aleatoria."),
     prob: float = typer.Option(0.25, "--prob", "-p", help="Probabilidad de fallo por llamada a malloc (0.0 a 1.0)."),
     json_output: bool = typer.Option(False, "--json", help="Emitir salida en formato JSON.")
@@ -360,7 +411,7 @@ def stress_cmd(
         FaultConfig(fault_type=FaultType.PROBABILISTIC, fail_probability=prob)
         for _ in range(iterations)
     ]
-    report = evaluate_robustness(target, scenarios=scenarios)
+    report = _evaluar(fuentes, scenarios, incluir=incluir, cflags=cflags)
 
     if json_output:
         print(json.dumps(report.model_dump(), indent=2, ensure_ascii=False))
@@ -427,7 +478,9 @@ def doctor_cmd(
 
 @app.command("report")
 def report_cmd(
-    target: Path = typer.Argument(..., help="Archivo .c o binario a evaluar.", exists=True),
+    fuentes: List[Path] = typer.Argument(..., help=AYUDA_FUENTES, exists=True, dir_okay=False),
+    incluir: Optional[List[Path]] = typer.Option(None, "-I", "--include", help=AYUDA_INCLUDE),
+    cflags: str = typer.Option("", "--cflags", help=AYUDA_CFLAGS),
     output: Optional[Path] = typer.Option(None, "--output", "-o", help="Ruta de destino del archivo Markdown."),
     faults_str: Optional[str] = typer.Option(None, "--faults", "-f", help="Especificación de fallos (e.g. 'malloc:1,fopen:2,write:ENOSPC')."),
     input_data: str = typer.Option("", "--input", "-i", help="Entrada estándar."),
@@ -435,7 +488,7 @@ def report_cmd(
     """Genera directamente la sección de reporte Markdown de VASQUEZ para Dredd."""
     scenarios = parse_fault_spec(faults_str) if faults_str else None
 
-    report = evaluate_robustness(target, scenarios=scenarios, input_data=input_data)
+    report = _evaluar(fuentes, scenarios, input_data, incluir, cflags)
     md_content = generar_seccion_markdown(report)
     if output:
         output.parent.mkdir(parents=True, exist_ok=True)

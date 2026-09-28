@@ -2,6 +2,7 @@
 
 from pathlib import Path
 from typing import Dict, Any
+from vasquez.core.errores import ErrorDeCompilacion
 from vasquez.core.fault_runner import evaluate_robustness
 
 
@@ -18,7 +19,14 @@ class VasquezPlugin:
             return {"passed": True, "message": "main.c no encontrado"}
 
         try:
-            report = evaluate_robustness(main_c)
+            try:
+                report = evaluate_robustness(main_c)
+            except ErrorDeCompilacion:
+                # Proyecto de varios archivos (N-VASQUEZ-02): main.c con los demás .c de su
+                # carpeta y los headers de include/ si la actividad usa esa estructura.
+                modulos = sorted(c for c in source_dir.glob("*.c") if c.name != "main.c")
+                incluir = [d for d in (source_dir / "include", source_dir.parent / "include") if d.is_dir()]
+                report = evaluate_robustness(main_c, fuentes_extra=modulos, cflags=[f"-I{d}" for d in incluir])
             return {
                 "passed": report.passed,
                 "total_scenarios": report.total_scenarios_tested,
