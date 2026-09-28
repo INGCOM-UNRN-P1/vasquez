@@ -103,6 +103,21 @@ def test_fuentes_extra_con_un_binario_es_error(tmp_path):
         evaluate_robustness(binario, fuentes_extra=[tmp_path / "otro.c"])
 
 
+def test_un_header_no_es_un_programa(tmp_path):
+    raiz = _actividad(tmp_path)
+    res = runner.invoke(app, ["check", str(raiz / "include/lista.h")])
+    assert res.exit_code == 2
+    assert "ni un programa ejecutable" in res.output
+    assert res.exception is None or isinstance(res.exception, SystemExit)
+
+
+def test_headers_como_fuentes_extra_sugieren_include(tmp_path):
+    raiz = _actividad(tmp_path)
+    res = runner.invoke(app, ["check", str(raiz / "src/main.c"), str(raiz / "include/lista.h")])
+    assert res.exit_code == 2
+    assert "-I carpeta" in res.output
+
+
 def test_plugin_ripley_con_proyecto_de_varios_archivos(tmp_path):
     raiz = _actividad(tmp_path)
     res = VasquezPlugin().run({"source_dir": str(raiz / "src")})

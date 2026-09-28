@@ -197,6 +197,12 @@ def run_single_fault_scenario(
         )
 
 
+def _es_ejecutable(ruta: Path) -> bool:
+    if sys.platform == "win32":
+        return ruta.is_file() and ruta.suffix.lower() == ".exe"
+    return ruta.is_file() and os.access(ruta, os.X_OK)
+
+
 def evaluate_robustness(
     source_or_binary: Path,
     scenarios: Optional[List[FaultConfig]] = None,
@@ -219,9 +225,20 @@ def evaluate_robustness(
             f"{source_or_binary.name} no es un fuente .c: los archivos adicionales solo se combinan con fuentes, "
             "no con un binario ya compilado."
         )
+    no_fuentes = [f.name for f in fuentes_extra if f.suffix != ".c"]
+    if no_fuentes:
+        raise ErrorVasquez(
+            f"{', '.join(no_fuentes)}: solo se compilan archivos .c; los headers no se pasan, se buscan con -I carpeta."
+        )
     mecanismo = mecanismo or mecanismo_por_defecto()
     if mecanismo == MECANISMO_ENLACE:
         return _evaluate_robustness_enlace(source_or_binary, scenarios, input_data, fuentes_extra, cflags)
+
+    if source_or_binary.suffix != ".c" and not _es_ejecutable(source_or_binary):
+        raise ErrorVasquez(
+            f"{source_or_binary.name} no es un fuente .c ni un programa ejecutable: pasá el .c con main "
+            "(y sus módulos) o el binario ya compilado."
+        )
 
     so_path = get_cached_injector_library()
 
