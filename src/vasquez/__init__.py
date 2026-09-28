@@ -18,5 +18,5 @@ from vasquez.core.constants import (
     ENV_TRACE_FILE,
 )
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
