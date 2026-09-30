@@ -139,6 +139,12 @@ def test_plugin_ripley_con_proyecto_de_varios_archivos(tmp_path):
 @pytest.mark.parametrize("salida, esperado", [
     ("main.c:3:10: fatal error: lista.h: No such file or directory", "-I"),
     ("undefined reference to `main'", "Falta el archivo con main"),
+    # MinGW (Windows): el enlazador reclama WinMain; antes caía en la pista genérica.
+    ("D:/msys64/ucrt64/bin/../lib/gcc/x86_64-w64-mingw32/15.2.0/../../../../x86_64-w64-mingw32/lib/"
+     "../lib/libmingw32.a(lib64_libmingw32_a-crtexewin.o): in function `main':\n"
+     "D:/W/B/src/mingw-w64/mingw-w64-crt/crt/crtexewin.c:62:(.text.startup+0xb6): "
+     "undefined reference to `WinMain'", "Falta el archivo con main"),
+    ("crt0_c.c:(.text.startup+0x2e): undefined reference to `WinMain@16'", "Falta el archivo con main"),
     ("main.c:(.text+0x9): undefined reference to `crear'", "pasalos todos"),
     ("multiple definition of `crear'", "definida en dos archivos"),
     ("error: expected ';' before '}' token", None),

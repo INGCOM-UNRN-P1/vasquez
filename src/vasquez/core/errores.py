@@ -7,6 +7,7 @@ Heredan de RuntimeError para no romper a quien ya las capturaba así.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Iterable, Optional
 
@@ -29,7 +30,8 @@ def pista_de_compilacion(salida: str) -> Optional[str]:
     """Sugerencia para los errores de compilación más comunes en proyectos de varios archivos."""
     if "No such file or directory" in salida and ".h" in salida:
         return "Si los headers están en otra carpeta, indicála con -I (por ejemplo: -I include)."
-    if "undefined reference to `main'" in salida or "undefined reference to 'main'" in salida:
+    # En Windows (MinGW) el enlazador reclama WinMain en lugar de main.
+    if re.search(r"undefined reference to [`'](?:_?main|w?WinMain(?:@\d+)?)'", salida):
         return "Falta el archivo con main: pasalo junto con los demás (por ejemplo: vasquez check src/main.c src/lista.c)."
     if "undefined reference" in salida:
         return "Si el programa tiene varios archivos .c, pasalos todos (por ejemplo: vasquez check src/main.c src/lista.c)."
