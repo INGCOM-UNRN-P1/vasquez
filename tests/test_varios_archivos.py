@@ -6,6 +6,7 @@ Los escenarios de integración se re-ejecutan en test_enlace.py bajo la vía de 
 from pathlib import Path
 
 import pytest
+from rich.text import Text
 from typer.testing import CliRunner
 
 from vasquez.cli import _dividir_cflags, app
@@ -88,9 +89,10 @@ def test_cli_modulo_sin_main_explica_como_seguir(tmp_path):
 
 def test_cli_cflags_mal_formado_es_error_de_uso(tmp_path):
     raiz = _actividad(tmp_path)
-    res = runner.invoke(app, ["check", str(raiz / "src/main.c"), "--cflags", '"-DX'])
+    res = runner.invoke(app, ["check", str(raiz / "src/main.c"), "--cflags", '"-DX'], env={"COLUMNS": "200"})
     assert res.exit_code == 2
-    assert "--cflags" in res.output
+    # Texto plano: en GitHub Actions, Typer resalta la salida con códigos ANSI que parten «--cflags».
+    assert "--cflags" in Text.from_ansi(res.output).plain
 
 
 def test_cli_rechaza_un_directorio(tmp_path):
