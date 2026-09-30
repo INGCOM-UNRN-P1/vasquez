@@ -109,3 +109,32 @@ vasquez inject app --faults "malloc:1" --check-leaks
 vasquez doctor
 ```
 
+<!-- p1:referencia:inicio — generado por p1-tools/scripts/readme_generado.py: no editar a mano -->
+
+## Referencia rápida
+
+### Requisitos
+
+- Python ≥ 3.11 y [uv](https://docs.astral.sh/uv/getting-started/installation/).
+- Programas del sistema: `gcc`.
+
+| Sistema | `gcc` |
+|:--|:--|
+| Debian / Ubuntu | `sudo apt install gcc` |
+| Fedora | `sudo dnf install gcc` |
+| Windows | incluido en el entorno de la cátedra (MSYS2 UCRT64) |
+| macOS | `xcode-select --install` (clang como `gcc`) |
+
+### Comandos
+
+| Comando | Descripción |
+|:--|:--|
+| `vasquez check`, `vasquez inject` | Inyecta fallos controlados (malloc/calloc/realloc NULL, cascada, memoria basura) evaluando la resiliencia del código C. |
+| `vasquez stress` | Ejecuta una prueba de estrés repetitiva con fallos probabilísticos de asignación. |
+| `vasquez doctor` | Audita el entorno y verifica la disponibilidad del compilador y la librería de inyección. |
+| `vasquez report` | Genera directamente la sección de reporte Markdown de VASQUEZ para Dredd. |
+| `vasquez version` | Muestra la versión de VASQUEZ. |
+
+Ayuda de cada comando: `vasquez <comando> -h`.
+
+<!-- p1:referencia:fin -->
