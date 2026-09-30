@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from vasquez.cli import app
+from vasquez.cli import _dividir_cflags, app
 from vasquez.core.errores import ErrorDeCompilacion, ErrorVasquez, pista_de_compilacion
 from vasquez.core.fault_runner import evaluate_robustness
 from vasquez.core.models import FaultConfig, FaultType
@@ -57,6 +57,17 @@ def test_cli_cflags_se_pasan_a_gcc(tmp_path):
     res = runner.invoke(app, ["check", str(raiz / "src/main.c"), str(raiz / "src/lista.c"),
                               "--cflags", f"-I{raiz / 'include'} -std=c11", "--faults", "malloc:1", "--json"])
     assert res.exit_code == 0, res.output
+
+
+@pytest.mark.parametrize("cflags, esperado", [
+    (r"-IC:\tp1\include -std=c11", [r"-IC:\tp1\include", "-std=c11"]),
+    (r'-I"C:\mis tps\include" -DDEBUG', [r"-IC:\mis tps\include", "-DDEBUG"]),
+])
+def test_cflags_conserva_las_rutas_de_windows(cflags, esperado):
+    # shlex tomaba la barra invertida como escape: «-IC:\tp1\include» llegaba a gcc como
+    # «-IC:tp1include» y el header no se encontraba (visto en el CI de Windows).
+    assert _dividir_cflags(cflags, windows=True) == esperado
+    assert _dividir_cflags("-I include -std=c11", windows=False) == ["-I", "include", "-std=c11"]
 
 
 def test_cli_header_en_otra_carpeta_explica_como_seguir(tmp_path):

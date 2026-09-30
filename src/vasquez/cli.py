@@ -1,6 +1,7 @@
 """CLI principal de VASQUEZ."""
 
 from __future__ import annotations
+import os
 import sys
 import json
 import shlex
@@ -56,9 +57,18 @@ AYUDA_INCLUDE = "Carpeta de headers para gcc (como -I); se puede repetir."
 AYUDA_CFLAGS = "Flags adicionales para gcc, entre comillas (por ejemplo: \"-std=c11 -DDEBUG\")."
 
 
+def _dividir_cflags(cflags: str, windows: bool = os.name == "nt") -> List[str]:
+    """Divide --cflags como lo haría un shell.
+
+    En Windows la barra invertida separa carpetas (`-IC:\\tp1\\include`) y shlex la tomaba
+    como escape: la ruta llegaba a gcc sin separadores. Se duplica antes de dividir.
+    """
+    return shlex.split(cflags.replace("\\", "\\\\") if windows else cflags)
+
+
 def _flags_de_compilacion(incluir: Optional[List[Path]], cflags: str) -> List[str]:
     try:
-        extra = shlex.split(cflags or "")
+        extra = _dividir_cflags(cflags or "")
     except ValueError as error:
         raise typer.BadParameter(f"--cflags mal formado: {error}.", param_hint="--cflags") from None
     return [f"-I{d}" for d in incluir or []] + extra
