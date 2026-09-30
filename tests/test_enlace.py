@@ -43,6 +43,8 @@ from test_new_qol_features import (  # noqa: F401
     test_cli_qol_options,
 )
 from test_varios_archivos import (  # noqa: F401
+    test_cli_cflags_se_pasan_a_gcc,
+    test_un_header_no_es_un_programa,
     test_cli_evalua_un_proyecto_de_varios_archivos,
     test_cli_header_en_otra_carpeta_explica_como_seguir,
     test_cli_modulo_sin_main_explica_como_seguir,
@@ -65,8 +67,9 @@ def test_objeto_enlace_en_cache():
 
 
 def test_enlace_rechaza_binarios(tmp_path):
-    binario = tmp_path / "app"
+    binario = tmp_path / ("app.exe" if sys.platform == "win32" else "app")
     binario.write_bytes(b"\x7fELF")
+    binario.chmod(0o755)  # un binario es un ejecutable; un archivo cualquiera se rechaza antes
     with pytest.raises(RuntimeError, match="requiere el fuente .c"):
         evaluate_robustness(binario)
 

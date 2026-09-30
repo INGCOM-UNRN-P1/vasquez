@@ -230,15 +230,15 @@ def evaluate_robustness(
         raise ErrorVasquez(
             f"{', '.join(no_fuentes)}: solo se compilan archivos .c; los headers no se pasan, se buscan con -I carpeta."
         )
-    mecanismo = mecanismo or mecanismo_por_defecto()
-    if mecanismo == MECANISMO_ENLACE:
-        return _evaluate_robustness_enlace(source_or_binary, scenarios, input_data, fuentes_extra, cflags)
-
+    # Antes de elegir la vía: en Windows (enlace), un .h se informaba como «binario ya compilado».
     if source_or_binary.suffix != ".c" and not _es_ejecutable(source_or_binary):
         raise ErrorVasquez(
             f"{source_or_binary.name} no es un fuente .c ni un programa ejecutable: pasá el .c con main "
             "(y sus módulos) o el binario ya compilado."
         )
+    mecanismo = mecanismo or mecanismo_por_defecto()
+    if mecanismo == MECANISMO_ENLACE:
+        return _evaluate_robustness_enlace(source_or_binary, scenarios, input_data, fuentes_extra, cflags)
 
     so_path = get_cached_injector_library()
 
