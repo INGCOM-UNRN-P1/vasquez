@@ -32,6 +32,8 @@ dependencies = [
     "typer>=0.9.0",
     "rich>=13.0.0",
     "pydantic>=2.0.0",
+    # Núcleo común del ecosistema (N-ECO-14): contrato de línea de comandos y textos en español.
+    "yutani @ git+https://github.com/INGCOM-UNRN-P1/yutani@e4c8e1050e5dd87a930c5404aba6b65d1be1665a",
 ]
 
 [project.urls]
@@ -54,3 +56,7 @@ pythonpath = ["src"]
 dev = [
     "pytest>=7.4.0",
 ]
+
+[tool.hatch.metadata]
+# yutani es una referencia directa a git (nunca por nombre en PyPI).
+allow-direct-references = true

@@ -7,6 +7,7 @@ import shlex
 from pathlib import Path
 from typing import Optional, List
 import typer
+from yutani.cli import crear_app
 from rich.console import Console
 from rich.markup import escape
 from rich.panel import Panel
@@ -35,11 +36,14 @@ def _forzar_utf8(stream) -> None:
 _forzar_utf8(sys.stdout)
 _forzar_utf8(sys.stderr)
 
-app = typer.Typer(
-    context_settings={"help_option_names": ["-h", "--help"]},
-    name="vasquez",
-    help="Motor de inyección de fallos de entorno y hardware en C vía LD_PRELOAD",
-    add_completion=True
+# Contrato de línea de comandos del ecosistema (-h/--help, --version/-v, errores de datos como
+# mensajes) y textos de Typer en español, desde yutani (N-ECO-14).
+app = crear_app(
+    "vasquez",
+    __version__,
+    "Motor de inyección de fallos de entorno y hardware en C vía LD_PRELOAD",
+    add_completion=True,
+    no_args_is_help=False,
 )
 console = Console()
 err_console = Console(stderr=True)
@@ -82,27 +86,6 @@ def _evaluar(
     except ErrorVasquez as error:
         err_console.print(f"[bold red]Error:[/bold red] {escape(str(error))}")
     raise typer.Exit(code=SALIDA_NO_EVALUABLE)
-
-
-def version_callback(value: bool):
-    if value:
-        console.print(f"[bold cyan]vasquez[/bold cyan] versión [green]{__version__}[/green]")
-        raise typer.Exit(code=0)
-
-
-@app.callback()
-def main(
-    version: bool = typer.Option(
-        False,
-        "-v",
-        "--version",
-        help="Muestra la versión de VASQUEZ y finaliza.",
-        callback=version_callback,
-        is_eager=True,
-    )
-):
-    """Punto de entrada principal de VASQUEZ."""
-    pass
 
 
 def generar_seccion_markdown(report: RobustnessReport) -> str:

@@ -285,6 +285,7 @@ dependencies = [
     { name = "pydantic" },
     { name = "rich" },
     { name = "typer" },
+    { name = "yutani" },
 ]
 
 [package.dev-dependencies]
@@ -297,7 +298,17 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "rich", specifier = ">=13.0.0" },
     { name = "typer", specifier = ">=0.9.0" },
+    { name = "yutani", git = "https://github.com/INGCOM-UNRN-P1/yutani?rev=e4c8e1050e5dd87a930c5404aba6b65d1be1665a" },
 ]
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = ">=7.4.0" }]
+
+[[package]]
+name = "yutani"
+version = "0.1.0"
+source = { git = "https://github.com/INGCOM-UNRN-P1/yutani?rev=e4c8e1050e5dd87a930c5404aba6b65d1be1665a#e4c8e1050e5dd87a930c5404aba6b65d1be1665a" }
+dependencies = [
+    { name = "rich" },
+    { name = "typer" },
+]
