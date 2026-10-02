@@ -33,7 +33,7 @@ dependencies = [
     "rich>=13.0.0",
     "pydantic>=2.0.0",
     # Núcleo común del ecosistema (N-ECO-14): contrato de línea de comandos y textos en español.
-    "yutani @ git+https://github.com/INGCOM-UNRN-P1/yutani@4b99a428c28ab5f3c3013b770b9692ade6182fc2",
+    "yutani @ git+https://github.com/INGCOM-UNRN-P1/yutani@31f79c904ac33065cc1c2b9fd34b4c513f0028d9",
 ]
 
 [project.urls]
