@@ -15,6 +15,7 @@ class FaultType(str, Enum):
     FOPEN_FAIL = "fopen"
     FWRITE_FAIL = "fwrite"
     FREAD_FAIL = "fread"
+    FREAD_SHORT = "fread_corto"  # lecturas parciales (QoL #991)
     FCLOSE_FAIL = "fclose"
     PROBABILISTIC = "probabilistic"
     CASCADE = "cascade"
@@ -35,6 +36,7 @@ class FaultConfig(BaseModel):
     garbage_memory: bool = False  # Mejora 25: rellenar memoria asignada con patrón basura
     poison_byte: int = 0xA5  # Byte de envenenamiento (por defecto 0xA5)
     errno_value: int = 12  # ENOMEM=12, EACCES=13, ENOENT=2, ENOSPC=28
+    short_read_items: int = 0  # fread devuelve a lo sumo N elementos por llamada (QoL #991)
     enable_trace: bool = False
     check_leaks: bool = False
 

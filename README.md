@@ -94,6 +94,32 @@ La opción `--faults` (disponible en `vasquez inject` y `vasquez report`) admite
 - `fread:<N>`: Falla la N-ésima lectura `fread` retornando 0 y fijando `errno = EIO`.
 - `fwrite:<bytes>` / `write:<bytes>` / `write:ENOSPC`: Falla la escritura luego de `<bytes>` o simula disco lleno (`ENOSPC`).
 - `fclose:<N>`: Falla la N-ésima invocación de `fclose` retornando `EOF` y fijando `errno = EIO`.
+- `<tipo>:<N>:<ERRNO>`: el mismo fallo con otro `errno` (`fopen:1:EMFILE`, `fread:2:EINTR`, `fwrite:0:EROFS`).
+- `fread_corto:<N>`: lecturas parciales: cada `fread` devuelve a lo sumo N elementos aunque haya más. Revela los programas que asumen que un `fread` siempre llena el búfer.
+
+### Plan de fallos en YAML
+
+Los escenarios de una actividad pueden quedar escritos en un `vasquez.scenario.yaml` (con
+`--plan archivo.yaml`, o sin opciones si está en el directorio del primer fuente), que dredd usa
+igual para todo el curso:
+
+```yaml
+escenarios:
+  - tipo: malloc
+    llamada: 2              # falla la segunda reserva
+  - tipo: fopen
+    errno: EACCES           # permiso denegado
+  - tipo: fwrite
+    despues_de_bytes: 1024  # disco lleno después de 1 KiB
+  - tipo: fread_corto
+    elementos: 1            # cada fread lee de a un elemento
+opciones:
+  fugas: true               # además, fugas en los caminos de error
+```
+
+Tipos: `malloc`, `calloc`, `realloc`, `strdup`, `posix_memalign`, `fopen`, `fwrite`, `fread`,
+`fclose`, `fread_corto`, `probabilistico`, `cascada`, `basura`. Un plan inválido (un tipo, una
+clave o un errno desconocidos) sale con código 2 y dice qué escenario está mal.
 
 ```bash
 # Inyectar fallo en realloc en la 1ra ocurrencia

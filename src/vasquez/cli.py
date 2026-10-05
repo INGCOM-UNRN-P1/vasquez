@@ -124,24 +124,7 @@ def generar_seccion_markdown(report: RobustnessReport) -> str:
     return "\n".join(lines)
 
 
-ERRNO_MAP: dict[str, int] = {
-    "EPERM": 1,
-    "ENOENT": 2,
-    "EIO": 5,
-    "ENXIO": 6,
-    "EBADF": 9,
-    "ENOMEM": 12,
-    "EACCES": 13,
-    "EFAULT": 14,
-    "EBUSY": 16,
-    "EEXIST": 17,
-    "EINVAL": 22,
-    "ENFILE": 23,
-    "EMFILE": 24,
-    "EFBIG": 27,
-    "ENOSPC": 28,
-    "EROFS": 30,
-}
+from vasquez.core.constants import ERRNO_MAP  # noqa: E402 — antes vivía acá; lo usa también core/plan.py
 
 
 def parse_fault_spec(
@@ -169,7 +152,7 @@ def parse_fault_spec(
 
     tipos_validos = {
         "malloc", "calloc", "realloc", "strdup", "posix_memalign",
-        "fopen", "fwrite", "write", "fread", "fclose",
+        "fopen", "fwrite", "write", "fread", "fclose", "fread_corto", "short_read",
         "cascade", "cascada", "garbage", "poison", "basura",
         "free_null", "free_null_audit"
     }
@@ -190,6 +173,12 @@ def parse_fault_spec(
 
         f_num = 1
         errno_val = 12
+        # `tipo:N:ERRNO`: en qué llamada falla y con qué errno (QoL #994).
+        if len(parts) > 2:
+            nombre_errno = parts[2].strip().upper()
+            if nombre_errno not in ERRNO_MAP:
+                raise typer.BadParameter(f"errno desconocido '{parts[2]}' en '{item}'. Válidos: {', '.join(sorted(ERRNO_MAP))}.")
+            errno_val = ERRNO_MAP[nombre_errno]
         if val_str:
             if val_str.isdigit():
                 f_num = int(val_str)
@@ -218,14 +207,16 @@ def parse_fault_spec(
         elif f_type_str in ("free_null", "free_null_audit"):
             scenarios.append(FaultConfig(fault_type=FaultType.AUDIT_FREE_NULL, fail_at_invocation=f_num, **{**base_kwargs, "audit_free_null": True, "enable_trace": True}))
         elif f_type_str == "fopen":
-            scenarios.append(FaultConfig(fault_type=FaultType.FOPEN_FAIL, fail_at_invocation=f_num, errno_value=errno_val if val_str.upper() in ERRNO_MAP else 13, cascade_failures=cascade, enable_trace=trace or audit_free_null))
+            scenarios.append(FaultConfig(fault_type=FaultType.FOPEN_FAIL, fail_at_invocation=f_num, errno_value=errno_val if (val_str.upper() in ERRNO_MAP or len(parts) > 2) else 13, cascade_failures=cascade, enable_trace=trace or audit_free_null))
         elif f_type_str in ("fwrite", "write"):
             fail_bytes = 0 if val_str.upper() == "ENOSPC" else f_num
             scenarios.append(FaultConfig(fault_type=FaultType.FWRITE_FAIL, fail_after_bytes=fail_bytes, errno_value=errno_val, cascade_failures=cascade, enable_trace=trace or audit_free_null))
         elif f_type_str == "fread":
-            scenarios.append(FaultConfig(fault_type=FaultType.FREAD_FAIL, fail_at_invocation=f_num, cascade_failures=cascade, enable_trace=trace or audit_free_null))
+            scenarios.append(FaultConfig(fault_type=FaultType.FREAD_FAIL, fail_at_invocation=f_num, errno_value=errno_val, cascade_failures=cascade, enable_trace=trace or audit_free_null))
         elif f_type_str == "fclose":
-            scenarios.append(FaultConfig(fault_type=FaultType.FCLOSE_FAIL, fail_at_invocation=f_num, cascade_failures=cascade, enable_trace=trace or audit_free_null))
+            scenarios.append(FaultConfig(fault_type=FaultType.FCLOSE_FAIL, fail_at_invocation=f_num, errno_value=errno_val, cascade_failures=cascade, enable_trace=trace or audit_free_null))
+        elif f_type_str in ("fread_corto", "short_read"):
+            scenarios.append(FaultConfig(fault_type=FaultType.FREAD_SHORT, fail_at_invocation=-1, short_read_items=f_num, enable_trace=trace or audit_free_null))
 
     return scenarios
 
@@ -311,6 +302,7 @@ def inject(
     input_data: str = typer.Option("", "--input", "-i", help="Entrada estándar (stdin)"),
     json_output: bool = typer.Option(False, "--json", help="Emitir salida en formato JSON estructurado"),
     output_md: Optional[Path] = typer.Option(None, "--md", "--output-md", help="Generar sección de reporte en formato Markdown para fusión en Dredd."),
+    plan: Optional[Path] = typer.Option(None, "--plan", help="Plan de fallos en YAML (vasquez.scenario.yaml). Sin --plan ni otros escenarios, se usa el que esté junto al primer fuente.", exists=True, dir_okay=False),
 ):
     """Inyecta fallos controlados (malloc/calloc/realloc NULL, cascada, memoria basura) evaluando la resiliencia del código C.
 
@@ -332,6 +324,18 @@ def inject(
         trace=trace,
         check_leaks=check_leaks,
     )
+
+    from vasquez.core.plan import PlanInvalido, cargar_plan, plan_junto_a
+
+    plan = plan or (None if scenarios else plan_junto_a(fuentes[0]))
+    if plan is not None:
+        try:
+            scenarios = scenarios + cargar_plan(plan)
+        except PlanInvalido as exc:
+            err_console.print(f"[bold red]Plan de fallos inválido:[/bold red] {exc}")
+            raise typer.Exit(code=2)
+        if not json_output:
+            err_console.print(f"[dim]Plan de fallos: {plan} ({len(scenarios)} escenarios).[/dim]")
 
     report = _evaluar(fuentes, scenarios if scenarios else None, input_data, incluir, cflags)
     target = fuentes[0]

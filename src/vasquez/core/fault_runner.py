@@ -30,6 +30,7 @@ from vasquez.core.constants import (
     ENV_FAIL_WRITE_AFTER_BYTES,
     ENV_FREAD_FAIL_AT,
     ENV_FCLOSE_FAIL_AT,
+    ENV_FREAD_SHORT,
     ENV_TRACE_FILE,
 )
 
@@ -109,6 +110,13 @@ def run_single_fault_scenario(
 
     elif fault.fault_type == FaultType.FCLOSE_FAIL:
         env[ENV_FCLOSE_FAIL_AT] = str(fault.fail_at_invocation)
+
+    elif fault.fault_type == FaultType.FREAD_SHORT:
+        env[ENV_FREAD_SHORT] = str(max(1, fault.short_read_items))
+
+    # errno elegido para el fallo de archivos (QoL #994); malloc y compañía siempre dejan ENOMEM.
+    if fault.fault_type in (FaultType.FWRITE_FAIL, FaultType.FREAD_FAIL, FaultType.FCLOSE_FAIL) and fault.errno_value != 12:
+        env[ENV_ERRNO] = str(fault.errno_value)
 
     trace_file_path = None
     if fault.enable_trace or fault.check_leaks or fault.audit_free_null or fault.fault_type == FaultType.AUDIT_FREE_NULL:

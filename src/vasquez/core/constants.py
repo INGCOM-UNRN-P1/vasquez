@@ -15,6 +15,29 @@ ENV_FOPEN_FAIL_AT = "VASQUEZ_FOPEN_FAIL_AT"
 ENV_ERRNO = "VASQUEZ_ERRNO"
 ENV_FAIL_WRITE_AFTER_BYTES = "VASQUEZ_FAIL_WRITE_AFTER_BYTES"
 ENV_FREAD_FAIL_AT = "VASQUEZ_FREAD_FAIL_AT"
+ENV_FREAD_SHORT = "VASQUEZ_FREAD_SHORT"
 ENV_FCLOSE_FAIL_AT = "VASQUEZ_FCLOSE_FAIL_AT"
 ENV_TRACE = "VASQUEZ_TRACE"
 ENV_TRACE_FILE = "VASQUEZ_TRACE_FILE"
+
+# Nombres de errno aceptados en --faults y en el plan YAML (valores de Linux; los de archivos
+# coinciden con los de Windows).
+ERRNO_MAP: dict[str, int] = {
+    "EPERM": 1,
+    "ENOENT": 2,
+    "EIO": 5,
+    "ENXIO": 6,
+    "EBADF": 9,
+    "ENOMEM": 12,
+    "EACCES": 13,
+    "EFAULT": 14,
+    "EBUSY": 16,
+    "EEXIST": 17,
+    "EINTR": 4,
+    "EINVAL": 22,
+    "ENFILE": 23,
+    "EMFILE": 24,
+    "EFBIG": 27,
+    "ENOSPC": 28,
+    "EROFS": 30,
+}

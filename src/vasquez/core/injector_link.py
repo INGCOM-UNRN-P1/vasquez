@@ -100,6 +100,10 @@ static long   fail_write_after_bytes = -1;
 
 static int fread_call_count = 0;
 static int fread_fail_at = -1;
+// QoL #991: lecturas parciales. fread devuelve a lo sumo esta cantidad de elementos por llamada.
+static long fread_corto = 0;
+// QoL #994: errno que deja el fallo de fwrite, fread o fclose (0: el de cada uno).
+static int errno_forzado = 0;
 
 static int fclose_call_count = 0;
 static int fclose_fail_at = -1;
@@ -162,7 +166,9 @@ static void init_vasquez(void) {
     if (env_fopen) fopen_fail_at = atoi(env_fopen);
 
     char *env_errno = getenv("VASQUEZ_ERRNO");
-    if (env_errno) fopen_errno = atoi(env_errno);
+    if (env_errno) { fopen_errno = atoi(env_errno); errno_forzado = atoi(env_errno); }
+    char *env_corto = getenv("VASQUEZ_FREAD_SHORT");
+    if (env_corto) fread_corto = atol(env_corto);
 
     char *env_write_after = getenv("VASQUEZ_FAIL_WRITE_AFTER_BYTES");
     if (env_write_after) fail_write_after_bytes = atol(env_write_after);
@@ -357,7 +363,7 @@ size_t vasquez_hook_fwrite(const void *ptr, size_t size, size_t nmemb, FILE *str
     size_t total_bytes = size * nmemb;
 
     if (cascade_active || (fail_write_after_bytes >= 0 && (bytes_written_total + total_bytes > (size_t)fail_write_after_bytes))) {
-        errno = 28; // ENOSPC (No space left on device)
+        errno = errno_forzado ? errno_forzado : 28; // ENOSPC (No space left on device)
         trigger_cascade();
         log_trace("[VASQUEZ] fwrite(%llu bytes) -> 0 [FALLO DISCO LLENO ENOSPC%s]", (unsigned long long)total_bytes, cascade_active ? " - CASCADA" : "");
         return 0;
@@ -373,11 +379,16 @@ size_t vasquez_hook_fread(void *ptr, size_t size, size_t nmemb, FILE *stream) {
     init_vasquez();
     fread_call_count++;
     if (cascade_active || (fread_fail_at > 0 && fread_call_count >= fread_fail_at)) {
+        errno = errno_forzado ? errno_forzado : 5; // EIO
         log_trace("[VASQUEZ] fread llamada #%d -> 0 [FALLO FORZADO I/O%s]", fread_call_count, cascade_active ? " - CASCADA" : "");
         trigger_cascade();
         return 0;
     }
-    size_t r = fread(ptr, size, nmemb, stream);
+    size_t pedidos = (fread_corto > 0 && nmemb > (size_t)fread_corto) ? (size_t)fread_corto : nmemb;
+    size_t r = fread(ptr, size, pedidos, stream);
+    if (pedidos < nmemb) {
+        log_trace("[VASQUEZ] fread lectura parcial: %llu de %llu elementos", (unsigned long long)r, (unsigned long long)nmemb);
+    }
     log_trace("[VASQUEZ] fread(%llu bytes) -> %llu", (unsigned long long)(size * nmemb), (unsigned long long)r);
     return r;
 }
@@ -386,7 +397,7 @@ int vasquez_hook_fclose(FILE *stream) {
     init_vasquez();
     fclose_call_count++;
     if (cascade_active || (fclose_fail_at > 0 && fclose_call_count >= fclose_fail_at)) {
-        errno = 5; // EIO
+        errno = errno_forzado ? errno_forzado : 5; // EIO
         log_trace("[VASQUEZ] fclose llamada #%d -> EOF [FALLO FORZADO I/O%s]", fclose_call_count, cascade_active ? " - CASCADA" : "");
         trigger_cascade();
         fclose(stream);
