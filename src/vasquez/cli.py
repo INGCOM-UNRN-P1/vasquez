@@ -6,7 +6,7 @@ import sys
 import json
 import shlex
 from pathlib import Path
-from typing import Optional, List
+from typing import Any, Dict, List, Optional
 import typer
 from yutani.cli import crear_app
 from rich.console import Console
@@ -141,7 +141,7 @@ def parse_fault_spec(
     Lanza typer.BadParameter ante tokens no reconocidos o valores inválidos.
     """
     scenarios: List[FaultConfig] = []
-    base_kwargs = {
+    base_kwargs: Dict[str, Any] = {
         "cascade_failures": cascade,
         "garbage_memory": garbage_memory,
         "poison_byte": poison_byte,
@@ -237,7 +237,7 @@ def build_cli_scenarios(
     check_leaks: bool = False,
 ) -> List[FaultConfig]:
     """Construye la lista unificada de escenarios a partir de las opciones CLI."""
-    base_kwargs = {
+    base_kwargs: Dict[str, Any] = {
         "cascade_failures": cascade,
         "audit_free_null": audit_free_null,
         "garbage_memory": garbage_memory,
