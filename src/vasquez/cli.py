@@ -333,7 +333,7 @@ def inject(
             scenarios = scenarios + cargar_plan(plan)
         except PlanInvalido as exc:
             err_console.print(f"[bold red]Plan de fallos inválido:[/bold red] {exc}")
-            raise typer.Exit(code=2)
+            raise typer.Exit(code=2) from exc
         if not json_output:
             err_console.print(f"[dim]Plan de fallos: {plan} ({len(scenarios)} escenarios).[/dim]")
 
